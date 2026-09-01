@@ -17,7 +17,11 @@ metadata:
 data:
   default.conf: |
     server {
-        listen 80;
+        # Must match the image's own listen and the Deployment's
+        # containerPort: the dashboard image is nginx-unprivileged (uid 101),
+        # which cannot bind :80 without CAP_NET_BIND_SERVICE — a capability
+        # ui.yaml deliberately drops.
+        listen 8080;
         server_name _;
         root /usr/share/nginx/html;
         index index.html;

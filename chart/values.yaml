@@ -300,6 +300,20 @@ affinity: {}
 #      Keycloak audience mapper — neither is expressible without (1).
 # The local-auth login form (auth.mode=local) works today and is unaffected.
 ui:
+  # OFF by default — and that default is a testing hazard worth stating,
+  # because it hid a real bug.
+  #
+  # Anything exercised only with default values never starts this container.
+  # The chart's kind proving run (full lifecycle, three NetworkPolicies, PSS
+  # labels, 43 RBAC allows / 15 denies) passed without the dashboard ever
+  # running once, so a crash-on-startup incompatibility between the image and
+  # this chart's own securityContext survived to a real cluster: stock nginx
+  # runs as root and chowns /var/cache/nginx, which needs CAP_CHOWN, which
+  # `capabilities: drop: ["ALL"]` removes. It CrashLoopBackOff'd on grace.
+  #
+  # Fixed by moving the image to nginx-unprivileged (uid 101, port 8080). The
+  # standing lesson: any verification of this chart must run at least once
+  # with `ui.enabled=true`, or this whole path is untested.
   enabled: false
   image:
     repository: ghcr.io/brandonrc/bifrost-ui
