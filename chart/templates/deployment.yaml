@@ -62,7 +62,17 @@ spec:
           type: RuntimeDefault
       containers:
         - name: bifrost
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          {{- /*
+            image.tag is REQUIRED, not defaulted. It used to fall through to
+            .Chart.AppVersion, which release.yaml stamps from the GitHub
+            Release tag (v0.1.0 -> "0.1.0") — but bifrost's publish workflow
+            only ever pushes `sha-<short>` and `latest`, so a default install
+            resolved to a tag that has never existed and lands in
+            ImagePullBackOff. A silent fallback to a non-existent version
+            string fails far from its cause; this fails at template time and
+            says what to do.
+          */}}
+          image: "{{ .Values.image.repository }}:{{ required "image.tag is required — bifrost publishes `sha-<short>` (preferred, immutable) and `latest`; .Chart.AppVersion is NOT a published tag. e.g. --set image.tag=sha-c7b0003" .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false

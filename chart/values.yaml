@@ -21,15 +21,31 @@ fullnameOverride: bifrost
 nameOverride: ""
 
 image:
-  # NOTE: no container image is PUBLISHED for Bifrost yet. The repo has a
-  # Dockerfile (UBI9-micro, static CGO_ENABLED=0 binary, USER 1001:0,
-  # ENTRYPOINT /usr/local/bin/bifrost) but no workflow that builds and pushes
-  # it — .github/workflows there is ci.yml, contract.yml and kind-e2e.yml
-  # only. This coordinate is the intended one, not a verified one. Until an
-  # image ships, build and push it yourself and install with
-  #   --set image.repository=<your registry>/bifrost --set image.tag=<tag>
+  # Published by bifrost's own .github/workflows/publish.yml on every push to
+  # main: UBI9-micro runtime, static CGO_ENABLED=0 binary, USER 1001:0,
+  # ENTRYPOINT /usr/local/bin/bifrost. That workflow tags `sha-<short>` and
+  # `latest`, and smoke-tests the pushed artifact (runs --version, asserts
+  # non-root and statically linked) before the job goes green.
   repository: ghcr.io/brandonrc/bifrost
-  # "" uses .Chart.AppVersion, which release.yaml stamps to the release tag.
+
+  # REQUIRED — there is deliberately no default, and templating fails with a
+  # message if you omit it.
+  #
+  # It used to default to "" and fall through to .Chart.AppVersion, which
+  # release.yaml stamps from the release tag ("0.1.0"). But publish.yml pushes
+  # only `sha-<short>` and `latest`, so that default named an image that has
+  # never existed: a plain `helm install` succeeded and then sat in
+  # ImagePullBackOff, failing far from its cause. A loud refusal beats a
+  # plausible wrong answer.
+  #
+  # PREFER `sha-<short>`. `latest` is mutable, and note what it does with the
+  # pullPolicy below: `latest` + IfNotPresent is the worst pairing available —
+  # a node caches whatever it first pulled and never re-pulls, so the cluster
+  # silently pins itself to an arbitrary old build. `latest` + Always is the
+  # other trap: a pod picks up whatever was pushed most recently the next time
+  # it happens to restart, which is exactly how a broken dashboard image came
+  # back after its fix had landed. A pinned SHA redeploys when you decide to.
+  #   --set image.tag=sha-c7b0003
   tag: ""
   pullPolicy: IfNotPresent
 
