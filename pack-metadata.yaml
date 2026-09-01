@@ -1,0 +1,44 @@
+# pack-metadata.yaml — consumed hourly by nebari-dev/software-pack-dashboard.
+# Schema: https://github.com/nebari-dev/software-pack-dashboard/blob/main/schema/pack-metadata.schema.json
+# Validate: check-jsonschema --schemafile pack-metadata.schema.json pack-metadata.yaml
+#
+# NOTE: `name` must equal the GitHub repo name exactly. If the repo is created
+# under a different name, update this field (and register the pack in
+# software-pack-dashboard/tracked-packs.yaml).
+
+name: bifrost-pack
+display_name: Bifrost Pack
+description: >-
+  Control plane for Ray and Dask clusters — OIDC bearer auth, deny-by-default
+  RBAC, self-serve clusters, Kueue pools, and a federating Ray Jobs gateway.
+level: experimental
+owner: brandonrc
+deprecated: false
+
+# May be null below ga.
+product_owner: null
+
+nebariapp_integration: full
+
+# Not shipping the docs site in this first cut. Flip to true only when a docs/
+# Astro build and a Cloudflare Pages project actually exist — the dashboard's
+# route generator adds packs.nebari.dev/bifrost-pack/ off this field.
+docs_site: false
+
+scope:
+  # The chart installs on a bare cluster with nebariApp.api.enabled=false.
+  # auth.mode=local then gives an IdP-free login; the kuberay-operator
+  # subchart (off by default) covers a cluster with no KubeRay at all.
+  standalone-supported: yes
+
+demo_notes: |
+  Go successor to mobula; supersedes mobula-pack. On a shared cluster keep
+  kuberay-operator.enabled=false (Grace runs 1.4.0; Helm never upgrades CRDs)
+  and keep ray.namespace off `ray` (rayserve-pack owns it; templating
+  refuses it). Gateway OIDC is off for the API on purpose: Bifrost validates
+  bearer tokens itself, so a SecurityPolicy would answer `ray job submit`
+  with a login redirect. BLOCKERS: no server image is published yet, and the
+  dashboard SSO needs a bifrost-ui fix.
+
+links:
+  docs: https://github.com/brandonrc/bifrost-pack/blob/main/README.md

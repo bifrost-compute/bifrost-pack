@@ -1,0 +1,100 @@
+name: Release
+
+# Self-contained release model, mirroring nebari-dev/provenance-collector-pack:
+# a human publishes a GitHub Release with tag vX.Y.Z and ONLY then does this
+# workflow run — there is deliberately no `on: push` trigger, so nothing can
+# auto-publish. It stamps chart/Chart.yaml to the tag version, packages the
+# chart, attaches the .tgz to the release, and syncs the chart into
+# nebari-dev/helm-repository (which publishes to quay.io/nebari/charts) via
+# its sync-chart action. That action copies `chart-path` into its own
+# checkout, which is also why the chart lives under chart/ (a repo-root chart
+# breaks the copy).
+#
+# First-party image tags are NOT pinned here (provenance model): the chart's
+# image tag stays a plain values.yaml default, bumped by normal PRs.
+# Requires the org-provided NEBARI_HELM_REPO_TOKEN, so the sync only works
+# inside the nebari-dev org.
+
+on:
+  release:
+    types: [published]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  lint:
+    name: Lint Helm Chart
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Build chart dependencies
+        run: helm dependency build chart/
+
+      - name: Lint chart
+        run: helm lint chart/
+
+  publish-helm-chart:
+    name: Package and Publish Helm Chart
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Update Chart version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/^version:.*/version: ${VERSION}/" chart/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" chart/Chart.yaml
+          echo "Chart.yaml after version update:"
+          cat chart/Chart.yaml
+
+      - name: Package Helm chart
+        run: |
+          helm dependency build chart/
+          mkdir -p dist
+          helm package chart/ --destination dist/
+
+      - name: Upload Helm chart to release
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        with:
+          files: dist/*.tgz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sync-helm-repository:
+    name: Sync Chart to Helm Repository
+    runs-on: ubuntu-latest
+    needs: publish-helm-chart
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Update Chart version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/^version:.*/version: ${VERSION}/" chart/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" chart/Chart.yaml
+
+      - name: Sync chart to helm-repository
+        uses: nebari-dev/helm-repository/.github/actions/sync-chart@main
+        with:
+          chart-path: chart
+          chart-name: bifrost-pack
+          token: ${{ secrets.NEBARI_HELM_REPO_TOKEN }}

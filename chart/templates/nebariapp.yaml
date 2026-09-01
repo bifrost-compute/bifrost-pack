@@ -1,0 +1,150 @@
+{{/*
+  NebariApp custom resources (reconcilers.nebari.dev/v1) — the single
+  integration point with the nebari-operator. Each becomes an HTTPRoute on the
+  shared Envoy Gateway plus a cert-manager Certificate for the hostname, and
+  (when auth.provisionClient) a Keycloak client whose credentials land in
+  Secret <nebariapp-name>-oidc-client.
+
+  Four operator behaviours this template is written around:
+    1. The namespace must carry `nebari.dev/managed: "true"` or the operator
+       ignores the CR entirely — no event, no condition. This chart cannot set
+       that label (the namespace is not its object); NOTES.txt says so.
+    2. spec.routing.routes is effectively required. Without it the operator
+       creates no HTTPRoute and the hostname 404s with RoutingNotConfigured,
+       so routing is not gated on `with` here — an empty routes list is a
+       misconfiguration, not a valid state.
+    3. spec.service.name must reference an already-existing Service (the
+       operator validates it). Both defaults below point at Services this
+       chart creates.
+    4. redirectURI must be a real callback path; Envoy rejects "/".
+
+  Auth posture for the API is deliberate and is the reason enforceAtGateway is
+  false: Bifrost validates OIDC bearer tokens in-process (ADR-0003 — caller
+  credentials terminate at the control plane). A gateway SecurityPolicy would
+  answer `ray job submit`, the `bifrost` CLI and every curl with an HTML
+  redirect to a login page. provisionClient stays true so the operator still
+  creates the Keycloak client — its id is the audience Bifrost requires.
+*/}}
+{{- define "bifrost-pack.nebariapp.auth" -}}
+{{- if .enabled -}}
+auth:
+  enabled: true
+  provider: {{ .provider | default "keycloak" }}
+  provisionClient: {{ .provisionClient | default false }}
+  enforceAtGateway: {{ .enforceAtGateway | default false }}
+  {{- with .redirectURI }}
+  redirectURI: {{ . | quote }}
+  {{- end }}
+  {{- with .scopes }}
+  scopes:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .groups }}
+  groups:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .spaClient }}
+  {{- if .enabled }}
+  spaClient:
+    enabled: true
+    {{- with .clientID }}
+    clientId: {{ . | quote }}
+    {{- end }}
+  {{- end }}
+  {{- end }}
+  {{- with .deviceFlowClient }}
+  {{- if .enabled }}
+  deviceFlowClient:
+    enabled: true
+  {{- end }}
+  {{- end }}
+{{- else -}}
+auth:
+  enabled: false
+{{- end }}
+{{- end }}
+
+{{- define "bifrost-pack.nebariapp.landingPage" -}}
+{{- if .enabled -}}
+landingPage:
+  enabled: true
+  {{- with .displayName }}
+  displayName: {{ . | quote }}
+  {{- end }}
+  {{- with .description }}
+  description: {{ . | quote }}
+  {{- end }}
+  {{- with .icon }}
+  icon: {{ . | quote }}
+  {{- end }}
+  {{- with .category }}
+  category: {{ . | quote }}
+  {{- end }}
+  {{- with .priority }}
+  priority: {{ . }}
+  {{- end }}
+  {{- with .externalUrl }}
+  externalUrl: {{ . | quote }}
+  {{- end }}
+  {{- with .healthCheck }}
+  healthCheck:
+    enabled: {{ .enabled | default false }}
+    {{- with .path }}
+    path: {{ . | quote }}
+    {{- end }}
+    {{- with .intervalSeconds }}
+    intervalSeconds: {{ . }}
+    {{- end }}
+    {{- with .timeoutSeconds }}
+    timeoutSeconds: {{ . }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.nebariApp.api.enabled }}
+apiVersion: reconcilers.nebari.dev/v1
+kind: NebariApp
+metadata:
+  name: {{ include "bifrost-pack.apiNebariAppName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+spec:
+  hostname: {{ required "nebariApp.api.hostname is required when nebariApp.api.enabled" .Values.nebariApp.api.hostname }}
+  service:
+    name: {{ include "bifrost-pack.fullname" . }}
+    port: {{ .Values.service.port }}
+  routing:
+    {{- toYaml .Values.nebariApp.api.routing | nindent 4 }}
+  {{- include "bifrost-pack.nebariapp.auth" .Values.nebariApp.api.auth | nindent 2 }}
+  {{- with .Values.nebariApp.api.gateway }}
+  gateway: {{ . | quote }}
+  {{- end }}
+  {{- include "bifrost-pack.nebariapp.landingPage" .Values.nebariApp.api.landingPage | nindent 2 }}
+{{- end }}
+{{- if .Values.nebariApp.ui.enabled }}
+{{- if not .Values.ui.enabled }}
+{{- fail "nebariApp.ui.enabled requires ui.enabled: the operator validates that spec.service.name references an existing Service" }}
+{{- end }}
+---
+apiVersion: reconcilers.nebari.dev/v1
+kind: NebariApp
+metadata:
+  name: {{ include "bifrost-pack.uiNebariAppName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bifrost-pack.ui.labels" . | nindent 4 }}
+spec:
+  hostname: {{ required "nebariApp.ui.hostname is required when nebariApp.ui.enabled" .Values.nebariApp.ui.hostname }}
+  service:
+    name: {{ include "bifrost-pack.ui.fullname" . }}
+    port: {{ .Values.ui.service.port }}
+  routing:
+    {{- toYaml .Values.nebariApp.ui.routing | nindent 4 }}
+  {{- include "bifrost-pack.nebariapp.auth" .Values.nebariApp.ui.auth | nindent 2 }}
+  {{- with .Values.nebariApp.ui.gateway }}
+  gateway: {{ . | quote }}
+  {{- end }}
+  {{- include "bifrost-pack.nebariapp.landingPage" .Values.nebariApp.ui.landingPage | nindent 2 }}
+{{- end }}

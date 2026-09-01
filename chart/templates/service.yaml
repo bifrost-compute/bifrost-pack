@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  # The NebariApp's spec.service.name must reference a Service that already
+  # exists — the operator validates it and reports ServiceNotFound otherwise.
+  # This is that Service; templates/nebariapp.yaml defaults to this name.
+  name: {{ include "bifrost-pack.fullname" . }}
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "bifrost-pack.selectorLabels" . | nindent 4 }}

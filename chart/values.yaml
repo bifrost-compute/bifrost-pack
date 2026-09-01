@@ -1,0 +1,419 @@
+# ============================================================================
+# bifrost-pack
+# ============================================================================
+# Bifrost is a Go control plane for Ray and Dask clusters: a REST API on :8484
+# with OIDC/JWKS bearer validation and deny-by-default RBAC, a persistent
+# desired-state store, a level-triggered reconciler that owns KubeRay
+# RayCluster/RayService objects, Kueue-backed resource pools, and a federating
+# Ray Jobs gateway.
+#
+# Every flag rendered by this chart exists on `bifrost serve`
+# (cmd/bifrost/serve.go). Flags mobula had but Bifrost deliberately did NOT
+# port — --policy, --audit-log, --metering-interval-secs, --demo — have no
+# values here on purpose. If you are migrating from mobula-pack, those knobs
+# are gone, not renamed.
+
+# Short, predictable object names ("bifrost", "bifrost-ui") regardless of the
+# release name, and therefore a short derived Keycloak client id. Clear this
+# (fullnameOverride: "") to get standard release-scoped names — required if
+# you install more than one Bifrost release into a single namespace.
+fullnameOverride: bifrost
+nameOverride: ""
+
+image:
+  # NOTE: no container image is PUBLISHED for Bifrost yet. The repo has a
+  # Dockerfile (UBI9-micro, static CGO_ENABLED=0 binary, USER 1001:0,
+  # ENTRYPOINT /usr/local/bin/bifrost) but no workflow that builds and pushes
+  # it — .github/workflows there is ci.yml, contract.yml and kind-e2e.yml
+  # only. This coordinate is the intended one, not a verified one. Until an
+  # image ships, build and push it yourself and install with
+  #   --set image.repository=<your registry>/bifrost --set image.tag=<tag>
+  repository: ghcr.io/brandonrc/bifrost
+  # "" uses .Chart.AppVersion, which release.yaml stamps to the release tag.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# >1 requires store.kind=postgres (enforced in _helpers.tpl). memory and
+# sqlite are single-writer, per-pod state.
+replicaCount: 1
+
+# Address `bifrost serve --bind` listens on. Bifrost fails closed on a
+# non-loopback bind with no configured authentication (api.CheckBindAllowed),
+# so this only works alongside auth.mode=oidc|local, or an explicit
+# auth.mode=none + dangerousDevAllowUnauthenticated.
+bind: 0.0.0.0:8484
+
+# --- Desired-state store ----------------------------------------------------
+# `bifrost serve --store <kind> [--db <dsn>]`. Unlike mobula, the backend is an
+# explicit choice, not sniffed from the DSN prefix.
+#   memory   - no persistence. Cluster ownership and audit history are lost on
+#              pod replacement; the reconciler rebuilds observed state from the
+#              cluster but has no desired state to reconcile toward. Dev only.
+#   sqlite   - (default) a file on a PVC (--db=/data/bifrost.db). Single
+#              writer: replicaCount is pinned to 1 and the roll strategy is
+#              Recreate.
+#   postgres - external Postgres (--db=<dsn>). Enables replicaCount>1 with a
+#              RollingUpdate; no PVC. Schema is created on first connect.
+store:
+  kind: sqlite
+  postgres:
+    # DSN passed to `--db` (postgres:// or postgresql://).
+    #
+    # SECURITY / KNOWN GAP: `bifrost serve` accepts the DSN only as a command
+    # line argument — there is no env-var or file indirection in
+    # cmd/bifrost/serve.go. The password is therefore visible in the pod spec
+    # (`kubectl get pod -o yaml`) to anyone with pod read in this namespace.
+    # This is inherited from mobula and is a tracked backend change, not
+    # something the chart can fix without a shell wrapper. Use a dedicated,
+    # rotatable role.
+    dsn: ""
+
+persistence:
+  # Only consulted when store.kind=sqlite. Disabled falls back to an emptyDir
+  # (state lost on pod replacement — same practical posture as store.kind=memory).
+  enabled: true
+  size: 2Gi
+  # "" = the cluster default StorageClass.
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
+# --- Authentication ---------------------------------------------------------
+# auth.mode selects how callers authenticate to the control plane:
+#   oidc  - (default) validate bearer JWTs against auth.oidc.*. Rendered to
+#           auth.json and passed `--auth-config`. NOTE: JSON, not mobula's
+#           TOML (cmd/bifrost/authconfig.go).
+#   local - IdP-free username/password auth (ADR-0011): `--local-auth`. On
+#           first boot an `admin` user is bootstrapped; the password comes
+#           from BIFROST_LOCAL_ADMIN_PASSWORD when auth.local.existingSecret
+#           is set, otherwise it is generated and written 0600 to
+#           /data/local-admin-password (store.kind=sqlite only — with
+#           postgres or memory there is no --db file path, so the password is
+#           only logged once).
+#   none  - NO caller authentication. Refused unless
+#           auth.dangerousDevAllowUnauthenticated is explicitly true.
+auth:
+  mode: oidc
+
+  oidc:
+    # OIDC issuer; {issuer}/.well-known/openid-configuration must resolve at
+    # boot — Bifrost performs discovery during startup and fails fast if it
+    # cannot. REPLACE this placeholder with your Nebari Keycloak realm, e.g.
+    # https://nebari.example.com/auth/realms/nebari
+    issuer: https://keycloak.example.com/realms/nebari
+
+    # Required `aud` claim on presented JWTs.
+    #
+    # Leave empty and it is DERIVED: when nebariApp.api provisions the
+    # Keycloak client, the operator names that client
+    # `<namespace>-<nebariapp-name>` (nebari-operator naming.ClientID), which
+    # this chart computes at template time. That is what keeps first boot
+    # deterministic — nothing here reads the operator's
+    # `<nebariapp>-oidc-client` Secret, which does not exist until after the
+    # operator's first reconcile. With no provisioning NebariApp it falls back
+    # to the literal "bifrost", for a hand-registered client.
+    #
+    # Enabling nebariApp.api therefore CHANGES the expected audience. The
+    # effective value is printed by NOTES.txt on every install and upgrade.
+    # Set this explicitly when the client is provisioned out of band, or when
+    # a Keycloak audience mapper puts a different value in `aud`.
+    audience: ""
+
+    # Claim carrying group memberships (Keycloak default: "groups").
+    groupsClaim: groups
+
+    # IdP group names -> Bifrost roles. "*" matches any authenticated caller.
+    # Deny-by-default: a caller mapping to no role authenticates fine and is
+    # authorized for nothing.
+    roles:
+      admin: []      # e.g. ["/platform-admins"]
+      operator: []   # e.g. ["/sre"]
+      developer: []  # e.g. ["/ml-eng"]
+      viewer: []     # e.g. ["*"]
+      auditor: []    # audit-trail readers (compliance)
+
+    # group -> project-role automation (self-service). A caller in a matching
+    # group automatically holds the mapped role scoped to project:<group>
+    # (after stripPrefix), with no manual `PUT /api/v1/access/assignments`.
+    # "*" => every group the caller is in derives its own project role.
+    # Omitted/empty keeps it off (deny-by-default).
+    projectRoles: {}
+    #   operator: ["*"]
+    #   developer: []
+    #   stripPrefix: "/"   # Keycloak "/team-a" groups -> project:team-a
+
+  local:
+    # Optional Secret providing the bootstrap admin password; its
+    # `passwordKey` becomes BIFROST_LOCAL_ADMIN_PASSWORD.
+    existingSecret: ""
+    passwordKey: BIFROST_LOCAL_ADMIN_PASSWORD
+
+  # Must be true for auth.mode=none to render at all.
+  dangerousDevAllowUnauthenticated: false
+
+# `--allow-insecure-transport`: permit auth tokens over cleartext http://
+# southbound. Default true because in-cluster Ray head services
+# (http://<id>-head-svc.<ns>.svc:8265 — the exact URL Bifrost's live client
+# builds) are plain HTTP and the tokens ride only the pod network. Set false
+# if every registered api_base_url is https.
+allowInsecureTransport: true
+
+# --- Cluster lifecycle (KubeRay + Kueue) ------------------------------------
+ray:
+  # Enables `serve --namespace=<ns>`: the reconciler, the pool reconciler, and
+  # the Ray Serve service routes. Without it Bifrost runs API-and-gateway only.
+  enabled: true
+
+  # Namespace Bifrost provisions RayClusters/RayServices into. "" = the release
+  # namespace.
+  #
+  # DO NOT point this at `ray`. On a Nebari cluster that namespace belongs to
+  # rayserve-pack's `shared` release. Bifrost's reconciler is already scoped by
+  # ownership label (it lists only `app.kubernetes.io/managed-by=bifrost`
+  # objects — internal/provision/live/client.go List/ServiceClient.List), so it
+  # will not reconcile or reap rayserve-pack's RayService. But it also applies
+  # namespace-level NetworkPolicy posture and Pod Security Standards labels to
+  # this namespace, which is not something to do to somebody else's. Templating
+  # fails on `ray` unless ray.allowRayNamespace=true.
+  namespace: ""
+  allowRayNamespace: false
+
+  # `--ray-autoscaling`: new clusters default to KubeRay in-tree-autoscaler
+  # ownership of worker replicas (ADR-0007). Per-cluster Kueue-elastic pools
+  # get it regardless.
+  autoscaling: false
+
+  # `--reconcile-interval` (Go duration). "" uses Bifrost's own default.
+  reconcileInterval: ""
+
+# --- kuberay-operator subchart ----------------------------------------------
+# OFF BY DEFAULT, and that default is load-bearing:
+#
+#   * Exactly one KubeRay operator may own a cluster's ray.io CRDs. Nebari
+#     clusters already run one — Grace runs kuberay-operator 1.4.0
+#     cluster-wide, and rayserve-pack vendors 1.3.0 as its own subchart.
+#   * Helm installs CRDs on first install ONLY and never upgrades them. The
+#     first chart to install wins; every later one silently runs against
+#     whatever CRD schema is already there. A 1.3.0-vendored install against
+#     1.4.0 CRDs (or the reverse) is a skew nothing reports.
+#   * Bifrost's own e2e runs against 1.4.0 (bifrost/.github/workflows/
+#     kind-e2e.yml), which is why this pin is 1.4.0 and not 1.3.0.
+#
+# Turn it on ONLY for a standalone install on a cluster with no KubeRay
+# operator at all — and then verify with `kubectl get crd rayclusters.ray.io
+# -o jsonpath='{.metadata.annotations}'` which release owns the CRDs.
+kuberay-operator:
+  enabled: false
+
+serviceAccount:
+  create: true
+  # "" = the chart fullname.
+  name: ""
+  annotations: {}
+
+rbac:
+  # Namespaced Role/RoleBinding in ray.namespace + the cluster-scoped
+  # ClusterRole/ClusterRoleBinding. Only rendered when ray.enabled.
+  create: true
+  # Kueue objects (Cohort/ResourceFlavor/ClusterQueue/LocalQueue) are
+  # cluster-scoped or listed across all namespaces, so they need their own
+  # cluster-wide rules. Harmless when the Kueue CRDs are absent — Bifrost
+  # probes for them (live.Client.KueuePresent) and degrades to in-process
+  # quota. Set false if your cluster policy forbids granting verbs on an API
+  # group that is not installed.
+  #
+  # KUEUE VERSION MATTERS: Bifrost targets kueue.x-k8s.io/**v1beta2** and
+  # probes for exactly that GroupVersion. Against a Kueue old enough to serve
+  # only v1beta1 the probe fails and the pool reconciler never starts —
+  # silently, with one INFO line ("Kueue CRDs absent — pools are in-process
+  # quota only"). Verified on kind: Kueue v0.14.2 fails the probe, v0.19.2
+  # passes it. These RBAC rules are version-independent (RBAC names groups
+  # and resources, not versions), so this toggle is not the thing to change
+  # if pools are not starting — upgrade Kueue.
+  kueue: true
+
+service:
+  type: ClusterIP
+  port: 8484
+  annotations: {}
+
+# --- Static cluster registry (federating job gateway) -----------------------
+# Pre-registered Ray clusters for the Jobs gateway (e.g. a shared cluster
+# deployed by rayserve-pack). Rendered to clusters.json and passed
+# `--registry`; when empty the flag is omitted entirely.
+#
+# Tokens: prefer authTokenEnv (the NAME of an env var read at startup) with
+# registryTokenSecret supplying that variable — the token then never touches a
+# ConfigMap. authToken (plaintext) is dev-only; Bifrost logs a warning for it.
+clusters: []
+# - id: shared
+#   hostname: ray.nebari.example.com
+#   apiBaseUrl: http://shared-nebari-rayserve-pack-head-svc.ray.svc:8265
+#   authTokenEnv: SHARED_RAY_TOKEN
+
+# Name of a Secret whose keys become environment variables on the bifrost
+# container (envFrom). Point clusters[].authTokenEnv at those keys.
+registryTokenSecret: ""
+
+# --- Network policy ---------------------------------------------------------
+# Ingress policy for the control plane itself. This is NOT the tenant policy
+# set — Bifrost applies its own default-deny / tenant-allow / per-cluster
+# policies to the Ray pods it provisions (internal/provision/kuberay.go), and
+# those are not templated here.
+networkPolicy:
+  enabled: false
+  # Namespaces allowed to reach :8484 (the Envoy Gateway's namespace, plus
+  # anything else that calls the API directly).
+  allowedNamespaces:
+    - envoy-gateway-system
+  extraIngress: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ============================================================================
+# Dashboard (bifrost-ui)
+# ============================================================================
+# nginx-served SPA. The image's baked nginx.conf reverse-proxies /api/,
+# /healthz and /docs to a hardcoded `http://bifrost:8484` (its docker-compose
+# service name), so this chart mounts its own rendered default.conf over it,
+# pointing at this release's control-plane Service.
+#
+# OFF BY DEFAULT for this first cut. Two things must land upstream before the
+# dashboard's SSO path works on a Nebari cluster:
+#   1. bifrost-ui/src/lib/pkce.ts hardcodes `SSO_CLIENT_ID = 'mobula'`. There
+#      is no build- or run-time override, so the SPA cannot use a Keycloak
+#      client the nebari-operator provisions (which would be
+#      `<namespace>-<nebariapp-name>-spa`).
+#   2. The token the SPA obtains must carry an `aud` Bifrost accepts. Today
+#      that means either pointing auth.oidc.audience at the SPA client, or a
+#      Keycloak audience mapper — neither is expressible without (1).
+# The local-auth login form (auth.mode=local) works today and is unaffected.
+ui:
+  enabled: false
+  image:
+    repository: ghcr.io/brandonrc/bifrost-ui
+    tag: latest
+    # `latest` is mutable: IfNotPresent would serve a node's stale cached
+    # layer after a re-push to the same tag. Pin a digest and set this back to
+    # IfNotPresent.
+    pullPolicy: Always
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ============================================================================
+# Nebari integration (NebariApp CRs — reconcilers.nebari.dev/v1)
+# ============================================================================
+# PREREQUISITE: the release namespace must carry `nebari.dev/managed: "true"`
+# or the nebari-operator ignores every NebariApp in it, silently.
+#   kubectl label namespace <ns> nebari.dev/managed=true --overwrite
+nebariApp:
+  api:
+    enabled: false
+    hostname: ""   # e.g. bifrost.nebari.example.com
+
+    auth:
+      # provisionClient + enforceAtGateway is the deliberate combination here.
+      #
+      # Bifrost validates OIDC bearer tokens itself (ADR-0003: caller
+      # credentials terminate at the control plane). If the gateway enforced
+      # OIDC it would answer `ray job submit`, the `bifrost` CLI, and every
+      # curl with an HTML redirect to a Keycloak login page. So the
+      # SecurityPolicy stays off — enforceAtGateway: false — while the
+      # operator still provisions the Keycloak client, whose id becomes the
+      # audience Bifrost requires (see auth.oidc.audience above).
+      enabled: true
+      provider: keycloak
+      provisionClient: true
+      enforceAtGateway: false
+      # Envoy rejects "/" here; /oauth2/callback is the gateway default. It is
+      # inert while enforceAtGateway is false, but the operator still records
+      # it on the provisioned client's valid redirect URIs.
+      redirectURI: /oauth2/callback
+      scopes: [openid, profile, email]
+      groups: []
+      # Public Keycloak client for the OAuth2 Device Authorization Grant —
+      # what `bifrost login` uses. Client id lands in the OIDC Secret under
+      # `device-client-id`; it is not read by this chart.
+      deviceFlowClient:
+        enabled: false
+      spaClient:
+        enabled: false
+
+    routing:
+      # REQUIRED. Without spec.routing the operator creates no HTTPRoute and
+      # the hostname 404s with RoutingNotConfigured.
+      routes:
+        - pathPrefix: /
+          pathType: PathPrefix
+
+    gateway: ""      # "" = the public gateway; "internal" = the internal one
+    landingPage:
+      enabled: false
+
+  # Second NebariApp for the dashboard. Requires ui.enabled — the operator
+  # validates that spec.service.name references an existing Service.
+  #
+  # Gateway auth is OFF here too, and that is a recommendation, not an
+  # oversight: the SPA runs its own sign-in and bearers its own API calls, and
+  # its /api/* requests are proxied to Bifrost by the pod's own nginx, so a
+  # gateway SecurityPolicy would authenticate the page load while doing
+  # nothing for the XHRs behind it. `enforceAtGateway: true` +
+  # `forwardAccessToken: true` is the coherent alternative — it would put a
+  # real bearer token on the upstream request — but only once the two
+  # bifrost-ui blockers listed under `ui:` above are fixed and the forwarded
+  # token's audience matches what Bifrost validates.
+  ui:
+    enabled: false
+    hostname: ""   # e.g. bifrost-dashboard.nebari.example.com
+    auth:
+      enabled: false
+      provider: keycloak
+      provisionClient: false
+      enforceAtGateway: false
+      redirectURI: /oauth2/callback
+      scopes: [openid, profile, email]
+      groups: []
+      spaClient:
+        enabled: false
+      deviceFlowClient:
+        enabled: false
+    routing:
+      routes:
+        - pathPrefix: /
+          pathType: PathPrefix
+    gateway: ""
+    landingPage:
+      enabled: true
+      displayName: Bifrost
+      description: Control plane for Ray and Dask clusters — SSO, RBAC, quotas, and a federating job gateway
+      icon: https://raw.githubusercontent.com/brandonrc/bifrost-pack/main/assets/bifrost-icon.png
+      category: Compute
+      priority: 20
+      healthCheck:
+        enabled: true
+        path: /healthz
+        intervalSeconds: 30
+        timeoutSeconds: 5

@@ -1,0 +1,131 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+
+      - name: Install kubeconform
+        env:
+          KUBECONFORM_VERSION: v0.8.0
+        run: |
+          curl -sSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | \
+            sudo tar -xz -C /usr/local/bin kubeconform
+
+      # The chart lives under chart/ (provenance-collector-pack layout —
+      # required by the helm-repository sync-chart action, which copies
+      # chart-path into its own checkout; a repo-root chart breaks that copy).
+      - name: Update chart dependencies
+        run: helm dependency update chart
+
+      - name: Lint chart
+        run: helm lint chart
+
+      - name: Template (defaults)
+        run: helm template test chart
+
+      - name: Template (Nebari - both NebariApps, Postgres HA, split Ray namespace)
+        run: |
+          helm template test chart -n bifrost \
+            --set replicaCount=2 \
+            --set store.kind=postgres \
+            --set store.postgres.dsn=postgres://bifrost:pw@postgres.data.svc:5432/bifrost \
+            --set ray.namespace=bifrost-clusters \
+            --set ui.enabled=true \
+            --set nebariApp.api.enabled=true \
+            --set nebariApp.api.hostname=bifrost.example.com \
+            --set nebariApp.ui.enabled=true \
+            --set nebariApp.ui.hostname=bifrost-dashboard.example.com
+
+      - name: Template (standalone - local auth, no lifecycle)
+        run: |
+          helm template test chart \
+            --set auth.mode=local \
+            --set store.kind=memory \
+            --set ray.enabled=false
+
+      # The API NebariApp must never render a gateway-enforced SecurityPolicy:
+      # Bifrost validates bearer tokens in-process, so an OIDC filter at the
+      # gateway would answer `ray job submit` with an HTML login redirect.
+      # A values change that flipped this default would be a silent outage.
+      - name: Assert API NebariApp keeps gateway enforcement off
+        run: |
+          helm template test chart -n bifrost \
+            --set nebariApp.api.enabled=true \
+            --set nebariApp.api.hostname=bifrost.example.com \
+            | grep -q "enforceAtGateway: false" \
+            || { echo "API NebariApp no longer sets enforceAtGateway: false"; exit 1; }
+
+      # spec.routing is what makes the operator create an HTTPRoute at all.
+      # Without it the hostname 404s with RoutingNotConfigured and nothing
+      # in the render looks wrong.
+      - name: Assert NebariApp routing is present
+        run: |
+          helm template test chart -n bifrost \
+            --set nebariApp.api.enabled=true \
+            --set nebariApp.api.hostname=bifrost.example.com \
+            | grep -q "pathPrefix: /" \
+            || { echo "NebariApp routing.routes did not render"; exit 1; }
+
+      # The reconciler reaches Ray heads only from pods carrying this label
+      # (Bifrost's own tenant-allow policy, internal/provision/kuberay.go).
+      - name: Assert control-plane pod label is stamped
+        run: |
+          helm template test chart \
+            | grep -q 'bifrost.dev/control-plane: "true"' \
+            || { echo "control-plane pod label missing from the Deployment"; exit 1; }
+
+      # rayserve-pack's `shared` release owns the `ray` namespace on Nebari
+      # clusters.
+      - name: Assert the `ray` namespace is refused
+        run: |
+          if helm template test chart --set ray.namespace=ray >/dev/null 2>&1; then
+            echo "ray.namespace=ray should have been refused"; exit 1
+          fi
+
+      - name: Validate rendered manifests with kubeconform
+        run: |
+          # -ignore-missing-schemas: NebariApp (reconcilers.nebari.dev) has no
+          # upstream JSON schema.
+          helm template test chart -n bifrost \
+            --set ui.enabled=true \
+            --set nebariApp.api.enabled=true \
+            --set nebariApp.api.hostname=bifrost.example.com \
+            --set nebariApp.ui.enabled=true \
+            --set nebariApp.ui.hostname=bifrost-dashboard.example.com \
+            | kubeconform -strict -summary -ignore-missing-schemas
+
+  pack-metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install check-jsonschema
+        run: pip install check-jsonschema
+
+      - name: Validate pack-metadata.yaml
+        run: |
+          curl -sSL -o /tmp/pack-metadata.schema.json \
+            https://raw.githubusercontent.com/nebari-dev/software-pack-dashboard/main/schema/pack-metadata.schema.json
+          check-jsonschema --schemafile /tmp/pack-metadata.schema.json pack-metadata.yaml
+
+      # `name` must equal the repo name or the dashboard flags the row.
+      - name: Assert metadata name matches the repo
+        run: |
+          want="${GITHUB_REPOSITORY##*/}"
+          got=$(grep -E '^name:' pack-metadata.yaml | awk '{print $2}')
+          [ "$got" = "$want" ] || { echo "pack-metadata name=$got, repo=$want"; exit 1; }

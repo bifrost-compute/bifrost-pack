@@ -1,0 +1,80 @@
+{{- if eq .Values.auth.mode "oidc" }}
+# OIDC validator config for `serve --auth-config`.
+#
+# JSON, not TOML: auth.AuthConfig carries `json` struct tags and
+# cmd/bifrost/authconfig.go decodes with encoding/json. mobula's auth.toml has
+# no equivalent here.
+#
+# The audience is computed at template time — see "bifrost-pack.oidcAudience"
+# in _helpers.tpl for why nothing in this chart reads the operator's
+# <nebariapp>-oidc-client Secret.
+#
+# Role mappings are deny-by-default: a caller matching no group list
+# authenticates but is authorized for nothing.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "bifrost-pack.fullname" . }}-auth
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+data:
+  auth.json: |
+    {{- $roles := .Values.auth.oidc.roles | default dict }}
+    {{- $cfg := dict
+          "issuer" .Values.auth.oidc.issuer
+          "audience" (include "bifrost-pack.oidcAudience" .)
+          "groups_claim" (.Values.auth.oidc.groupsClaim | default "groups")
+          "roles" (dict
+            "admin"     ($roles.admin     | default list)
+            "operator"  ($roles.operator  | default list)
+            "developer" ($roles.developer | default list)
+            "viewer"    ($roles.viewer    | default list)
+            "auditor"   ($roles.auditor   | default list))
+    }}
+    {{- with .Values.auth.oidc.projectRoles }}
+    {{- $pr := dict
+          "admin"     (.admin     | default list)
+          "operator"  (.operator  | default list)
+          "developer" (.developer | default list)
+          "viewer"    (.viewer    | default list)
+          "auditor"   (.auditor   | default list)
+          "strip_prefix" (.stripPrefix | default "") }}
+    {{- $_ := set $cfg "project_roles" $pr }}
+    {{- end }}
+    {{ $cfg | toPrettyJson | nindent 4 | trim }}
+{{- end }}
+{{- if .Values.clusters }}
+---
+# Static cluster registry for the federating Jobs gateway
+# (`serve --registry`). JSON, matching core.ClusterRegistry's `json` tags —
+# cmd/bifrost/registry.go decodes with encoding/json; mobula's clusters.toml
+# has no equivalent here.
+#
+# This is a ConfigMap, not a Secret. Prefer authTokenEnv (the NAME of an env
+# var supplied by registryTokenSecret) over inlining a plaintext authToken:
+# Bifrost logs a warning for every plaintext entry, and the registry's own
+# validation refuses cleartext tokens over http:// unless
+# allowInsecureTransport is set.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "bifrost-pack.fullname" . }}-registry
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+data:
+  clusters.json: |
+    {{- $entries := list }}
+    {{- range .Values.clusters }}
+    {{- $e := dict
+          "id" (required "clusters[].id is required" .id)
+          "hostname" (required "clusters[].hostname is required" .hostname)
+          "api_base_url" (required "clusters[].apiBaseUrl is required" .apiBaseUrl) }}
+    {{- if .authTokenEnv }}
+    {{- $_ := set $e "auth_token_env" .authTokenEnv }}
+    {{- else if .authToken }}
+    {{- $_ := set $e "auth_token" .authToken }}
+    {{- end }}
+    {{- $entries = append $entries $e }}
+    {{- end }}
+    {{ dict "clusters" $entries | toPrettyJson | nindent 4 | trim }}
+{{- end }}

@@ -1,0 +1,42 @@
+apiVersion: v2
+name: bifrost-pack
+description: >-
+  Nebari software pack for Bifrost — the Go control plane for Ray and Dask
+  clusters. Exposes a REST API on :8484 with OIDC/JWKS bearer validation and
+  deny-by-default RBAC, reconciles KubeRay RayCluster/RayService resources it
+  owns, manages Kueue resource pools, and federates the Ray Jobs API behind a
+  single authenticated gateway.
+type: application
+icon: https://raw.githubusercontent.com/brandonrc/bifrost-pack/main/assets/bifrost-icon.png
+
+home: https://github.com/brandonrc/bifrost-pack
+sources:
+  - https://github.com/brandonrc/bifrost
+  - https://github.com/brandonrc/bifrost-ui
+  - https://github.com/brandonrc/bifrost-pack
+
+keywords:
+  - nebari
+  - ray
+  - kuberay
+  - dask
+  - kueue
+  - control-plane
+
+# Placeholder in-repo versions: .github/workflows/release.yaml stamps BOTH
+# version and appVersion to the GitHub Release tag (vX.Y.Z -> X.Y.Z) at
+# publish time (provenance-collector-pack / dask-gateway-pack model).
+# Versioning = EffVer.
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  # OFF BY DEFAULT — see values.yaml's `kuberay-operator` block for the full
+  # argument. Short version: exactly one KubeRay operator may own the ray.io
+  # CRDs on a cluster, Helm installs CRDs only on first install, and Nebari
+  # clusters already run one (Grace: 1.4.0 cluster-wide). This subchart exists
+  # only so `standalone-supported: yes` holds on a bare cluster.
+  - name: kuberay-operator
+    version: 1.4.0
+    repository: https://ray-project.github.io/kuberay-helm/
+    condition: kuberay-operator.enabled

@@ -1,0 +1,205 @@
+{{- include "bifrost-pack.validate" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bifrost-pack.fullname" . }}
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+spec:
+  {{- if eq .Values.store.kind "postgres" }}
+  # Postgres store: multiple writers are safe, so run replicaCount pods
+  # behind a RollingUpdate.
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+  {{- else }}
+  # SQLite is a single writer on an RWO claim and `memory` is per-pod state:
+  # a second pod during a roll would either fail to attach the volume or
+  # diverge. Single replica, Recreate. (replicaCount>1 is rejected in
+  # _helpers.tpl's validate.)
+  replicas: 1
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "bifrost-pack.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "bifrost-pack.labels" . | nindent 8 }}
+        # REQUIRED, not decorative. The tenant-allow NetworkPolicy Bifrost
+        # itself applies to the Ray pods it provisions admits ingress to the
+        # head's dashboard (8265) and Ray client (10001) ports ONLY from pods
+        # carrying this exact label — never from a bare namespace selector
+        # (internal/provision/kuberay.go, ControlPlanePodLabel /
+        # TenantAllowNetworkPolicy). Drop it and the reconciler still works
+        # (it talks to the API server) but every dashboard/jobs/nodes proxy
+        # call to a Ray head is blackholed by Bifrost's own policy.
+        bifrost.dev/control-plane: "true"
+      annotations:
+        # Roll the pod when the rendered config changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "bifrost-pack.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        # Matches the image's `USER 1001:0`. Group 0 rather than a private
+        # group is the OpenShift-compatible posture the Dockerfile chose: an
+        # arbitrary-UID runtime keeps gid 0, so group-readable files stay
+        # readable. fsGroup makes the PVC writable for that uid.
+        runAsUser: 1001
+        runAsGroup: 0
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bifrost
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Bifrost writes only to /data (SQLite file + the local-auth
+            # password file), which is a mounted volume.
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          args:
+            - serve
+            - --bind={{ .Values.bind }}
+            - --store={{ .Values.store.kind }}
+            {{- if eq .Values.store.kind "sqlite" }}
+            - --db=/data/bifrost.db
+            {{- else if eq .Values.store.kind "postgres" }}
+            # See values.yaml: the DSN is visible in the pod spec. Tracked
+            # backend gap — `serve` has no env/file indirection for --db.
+            - --db={{ .Values.store.postgres.dsn }}
+            {{- end }}
+            {{- if eq .Values.auth.mode "oidc" }}
+            - --auth-config=/etc/bifrost/auth/auth.json
+            {{- else if eq .Values.auth.mode "local" }}
+            - --local-auth
+            {{- else }}
+            # auth.mode=none, explicitly confirmed via
+            # auth.dangerousDevAllowUnauthenticated (see validate).
+            - --dev-allow-unauthenticated
+            {{- end }}
+            {{- if .Values.allowInsecureTransport }}
+            - --allow-insecure-transport
+            {{- end }}
+            {{- if .Values.clusters }}
+            - --registry=/etc/bifrost/registry/clusters.json
+            {{- end }}
+            {{- if .Values.ray.enabled }}
+            - --namespace={{ include "bifrost-pack.rayNamespace" . }}
+            {{- if .Values.ray.autoscaling }}
+            - --ray-autoscaling
+            {{- end }}
+            {{- with .Values.ray.reconcileInterval }}
+            - --reconcile-interval={{ . }}
+            {{- end }}
+            {{- end }}
+          {{- if and (eq .Values.auth.mode "local") .Values.auth.local.existingSecret }}
+          env:
+            - name: BIFROST_LOCAL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.local.existingSecret }}
+                  key: {{ .Values.auth.local.passwordKey | default "BIFROST_LOCAL_ADMIN_PASSWORD" }}
+          {{- end }}
+          {{- with .Values.registryTokenSecret }}
+          # Secret keys become env vars; clusters[].authTokenEnv names them.
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8484
+              protocol: TCP
+          # /healthz is in Bifrost's unauthenticated allowlist
+          # (internal/api/middleware.go isPublic), so probes need no token.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            {{- if eq .Values.auth.mode "oidc" }}
+            - name: auth
+              mountPath: /etc/bifrost/auth
+              readOnly: true
+            {{- end }}
+            {{- if .Values.clusters }}
+            - name: registry
+              mountPath: /etc/bifrost/registry
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: data
+          {{- if and (eq .Values.store.kind "sqlite") .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "bifrost-pack.fullname" . }}-data
+          {{- else }}
+          # No SQLite file to keep: /data is scratch (the local-auth password
+          # file, if any). emptyDir keeps it per-pod.
+          emptyDir: {}
+          {{- end }}
+        {{- if eq .Values.auth.mode "oidc" }}
+        - name: auth
+          configMap:
+            name: {{ include "bifrost-pack.fullname" . }}-auth
+        {{- end }}
+        {{- if .Values.clusters }}
+        - name: registry
+          configMap:
+            name: {{ include "bifrost-pack.fullname" . }}-registry
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- if and (eq .Values.store.kind "sqlite") .Values.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "bifrost-pack.fullname" . }}-data
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.persistence.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

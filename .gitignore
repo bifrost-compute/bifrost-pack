@@ -1,0 +1,26 @@
+# Helm
+chart/charts/
+chart/Chart.lock
+*.tgz
+
+# Dev cache (cloned nebari-operator for local dev)
+dev/.cache/
+
+# Worktrees
+.worktrees/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local agent / contributor playbooks (not for the public repo)
+AGENT.md
+AGENTS.md
+CLAUDE.md

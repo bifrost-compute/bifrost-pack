@@ -1,0 +1,145 @@
+{{- if and .Values.ray.enabled .Values.rbac.create }}
+{{- $rayNs := include "bifrost-pack.rayNamespace" . }}
+# RBAC for the cluster-lifecycle path (`serve --namespace`). Every rule below
+# is derived from an actual call in Bifrost's live Kubernetes client
+# (bifrost/internal/provision/live/client.go) — the ONLY package in Bifrost
+# that opens a connection to an API server. Nothing is granted "just in case";
+# where a verb looks conspicuously absent there is a comment saying which call
+# would have needed it and why there isn't one.
+#
+# Two verbs deserve a general note:
+#   * `patch` is server-side apply. Every mutation in the live client goes
+#     through applySSA (client.Patch with client.Apply), never Create/Update.
+#   * `create` accompanies `patch` on every resource Bifrost applies, because
+#     the API server authorizes an SSA that CREATES the object against the
+#     `create` verb as well as `patch`. Without it, first-apply 403s and
+#     re-apply of an existing object succeeds — an intermittent failure that
+#     only shows up on a fresh namespace.
+#   * There are no `watch` verbs anywhere: the reconciler polls on its resync
+#     interval (controller-runtime is used as an uncached library — no
+#     Manager, no informers), so nothing here ever opens a watch.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "bifrost-pack.fullname" . }}-ray
+  namespace: {{ $rayNs }}
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+rules:
+  # RayCluster: Apply (SSA -> create+patch), Suspend/Resume (merge patch ->
+  # patch), Terminate (delete), Observe/ClusterNodes (get), List (list, with
+  # the app.kubernetes.io/managed-by=bifrost selector).
+  # RayService: Deploy (SSA -> create+patch), Get (get), Delete (delete),
+  # List (list, same ownership selector).
+  - apiGroups: ["ray.io"]
+    resources: ["rayclusters", "rayservices"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+
+  # NetworkPolicy: Bifrost owns the tenant network posture in this namespace —
+  # a default-deny plus a tenant-allow scoped to pods it provisioned, and one
+  # per-cluster intra-tenant allow per RayCluster/RayService.
+  #   list   - adminManagedDeny's check-then-apply probe (it reads every
+  #            policy in the namespace to find an admin's own default-deny,
+  #            and backs off entirely if one exists)
+  #   create+patch - applyNetworkPolicy's SSA
+  #   delete - deleteClusterAllow / ReapNetworkPolicies
+  # No `get`: every read is the namespace-wide list above, and the deletes are
+  # by name.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["list", "create", "patch", "delete"]
+
+  # Pods: ClusterNodes and ClusterLogs both LIST by the KubeRay-injected
+  # ray.io/cluster label to build the head/worker breakdown and to resolve
+  # which pods a log tail may target. Kubernetes is the source of truth here,
+  # never the Ray dashboard, so these answer even when the dashboard is down.
+  # No `get`: the live client never fetches a single pod by name.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+
+  # pods/log backs the logs tab: clientset.CoreV1().Pods(ns).GetLogs(...) is a
+  # GET on the log subresource. The target pod is always validated against the
+  # cluster's own pod set first, so this cannot tail an arbitrary pod.
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+
+  # Events: ClusterEvents lists core/v1 Events in the namespace and filters to
+  # the cluster's own objects in a pure helper (a fieldSelector cannot express
+  # the `<id>-` name-prefix match), which is why this is a namespace-wide list.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "bifrost-pack.fullname" . }}-ray
+  namespace: {{ $rayNs }}
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "bifrost-pack.fullname" . }}-ray
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "bifrost-pack.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+# Cluster-scoped rules. Named with the release namespace so two installs in
+# different namespaces never collide on a cluster-scoped object name.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-{{ include "bifrost-pack.fullname" . }}
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+rules:
+  # Namespace: EnsureNamespacePosture reads the Ray namespace's labels and
+  # server-side-applies the Pod Security Standards labels onto it (and never
+  # downgrades an existing `restricted` enforce). Narrowed with resourceNames
+  # to exactly that one namespace — get and patch both honour resourceNames.
+  # No `create`: the namespace must already exist; Bifrost reports it as a
+  # backend error if it does not.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames: [{{ $rayNs | quote }}]
+    verbs: ["get", "patch"]
+  {{- if .Values.rbac.kueue }}
+
+  # Kueue pool objects. Cohort, ResourceFlavor and ClusterQueue are
+  # cluster-scoped; LocalQueue is namespaced but Bifrost lists it ACROSS all
+  # namespaces by the bifrost.dev/pool label (DeletePool/ObservePool), so it
+  # has to be granted cluster-wide too.
+  #   create+patch - ApplyPool's SSA of each object
+  #   list         - DeletePool's label-selected teardown sweep, and
+  #                  ObservePool's per-project LocalQueue usage read
+  #   delete       - DeletePool
+  # `get` is granted ONLY on clusterqueues: ObservePool reads the pool's quota
+  # ledger straight off ClusterQueue.status. Nothing fetches a Cohort,
+  # ResourceFlavor or LocalQueue by name.
+  - apiGroups: ["kueue.x-k8s.io"]
+    resources: ["clusterqueues"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  - apiGroups: ["kueue.x-k8s.io"]
+    resources: ["cohorts", "resourceflavors", "localqueues"]
+    verbs: ["list", "create", "patch", "delete"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-{{ include "bifrost-pack.fullname" . }}
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-{{ include "bifrost-pack.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "bifrost-pack.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

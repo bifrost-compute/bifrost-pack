@@ -1,0 +1,63 @@
+{{- if .Values.networkPolicy.enabled }}
+# Ingress policy for the Bifrost control plane itself.
+#
+# This is NOT the tenant policy set. Bifrost applies its own default-deny,
+# tenant-allow and per-cluster-allow NetworkPolicies to the Ray pods it
+# provisions (internal/provision/kuberay.go) — those are the server's job, are
+# reconciled continuously, and are deliberately not templated here. Two
+# consequences worth knowing:
+#   * Bifrost backs off entirely if it finds a default-deny in the Ray
+#     namespace that it does not own (adminManagedDeny), so a hand-written
+#     namespace-wide default-deny silently disables Bifrost's tenant
+#     isolation rather than layering with it.
+#   * Bifrost's tenant-allow admits the control plane to Ray heads only via
+#     pods labelled bifrost.dev/control-plane=true. The Deployment carries
+#     that label; if the control plane runs in a DIFFERENT namespace from the
+#     Ray pods, that namespace must also carry bifrost.dev/control-plane=true.
+#
+# Egress is unrestricted here on purpose: the control plane talks to the
+# Kubernetes API server, the OIDC issuer, Postgres, and every registered Ray
+# head — an egress allow-list would need all four and is better expressed by
+# the cluster's own policy, not this chart.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "bifrost-pack.fullname" . }}
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "bifrost-pack.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    {{- if .Values.networkPolicy.allowedNamespaces }}
+    # Namespaces matched by the kubernetes.io/metadata.name auto-label. Verify
+    # the gateway's actual namespace per cluster:
+    #   kubectl get pods -A -o wide | grep -i envoy
+    - from:
+        {{- range .Values.networkPolicy.allowedNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . | quote }}
+        {{- end }}
+      ports:
+        - port: 8484
+          protocol: TCP
+    {{- end }}
+    {{- if .Values.ui.enabled }}
+    # The dashboard pod's nginx reverse-proxies /api, /healthz and /docs to
+    # the control-plane Service.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "bifrost-pack.ui.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 8484
+          protocol: TCP
+    {{- end }}
+    {{- with .Values.networkPolicy.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

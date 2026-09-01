@@ -1,0 +1,189 @@
+name: Test
+
+# Applies the chart to a real kind cluster and then interrogates the RBAC it
+# created with `kubectl auth can-i`.
+#
+# Why this shape rather than "install and wait for the pod to be Ready": no
+# container image is published for the Bifrost server yet (the bifrost repo
+# has a Dockerfile but no workflow that pushes one), so `--wait` would block
+# on an ImagePullBackOff that says nothing about the chart. Everything this
+# job checks is real regardless:
+#   * every manifest is accepted by a live API server, validated against the
+#     real KubeRay and Kueue CRD schemas (not kubeconform's approximations);
+#   * the ServiceAccount is authorized for exactly the verbs Bifrost's live
+#     Kubernetes client calls — and, just as importantly, NOT authorized for
+#     verbs it does not call. An over-granted Role is the failure mode a
+#     rendering test cannot see.
+#
+# Add a pod-readiness + /healthz step here once a published image exists.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  RELEASE: bifrost
+  NS: bifrost
+  RAY_NS: bifrost-clusters
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: pack-test
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+
+      # The chart does NOT install KubeRay (kuberay-operator.enabled=false is
+      # the default and is load-bearing). Install one here, at the version
+      # bifrost's own kind-e2e workflow uses, so the ray.io CRDs the chart's
+      # RBAC references actually exist.
+      - name: Install kuberay-operator 1.4.0
+        run: |
+          helm repo add kuberay https://ray-project.github.io/kuberay-helm/
+          helm repo update
+          helm install kuberay-operator kuberay/kuberay-operator \
+            --version 1.4.0 --wait --timeout 5m
+
+      # Bifrost's pool provisioner is built against kueue.x-k8s.io/v1beta2
+      # (internal/provision/kueue.go; sigs.k8s.io/kueue v0.19.2 in go.mod) and
+      # probes for exactly that GroupVersion. A Kueue old enough to serve only
+      # v1beta1 makes KueuePresent() report false and the pool reconciler
+      # never starts — verified on kind: v0.14.2 logs "Kueue CRDs absent",
+      # v0.19.2 logs "pool reconcile loop started (Kueue present)". Do not
+      # downgrade this pin without checking that.
+      - name: Install Kueue v0.19.2 (serves v1beta2)
+        run: |
+          kubectl apply --server-side -f \
+            https://github.com/kubernetes-sigs/kueue/releases/download/v0.19.2/manifests.yaml
+          kubectl wait --for=condition=Established --timeout=120s \
+            crd/clusterqueues.kueue.x-k8s.io crd/localqueues.kueue.x-k8s.io \
+            crd/cohorts.kueue.x-k8s.io crd/resourceflavors.kueue.x-k8s.io
+          # Its webhooks intercept Deployment admission; the chart's install
+          # fails with a connection-refused webhook error until it is up.
+          kubectl wait --for=condition=Available deploy/kueue-controller-manager \
+            -n kueue-system --timeout=300s
+
+      - name: Update chart dependencies
+        run: helm dependency update chart
+
+      - name: Create namespaces
+        run: |
+          kubectl create namespace "$NS"
+          kubectl create namespace "$RAY_NS"
+          kubectl label namespace "$NS" bifrost.dev/control-plane=true --overwrite
+
+      # --wait is deliberately absent: see the header. --atomic is too, since
+      # it implies --wait.
+      - name: Install chart
+        run: |
+          helm install "$RELEASE" chart \
+            --namespace "$NS" \
+            --set auth.mode=local \
+            --set ray.namespace="$RAY_NS" \
+            --set persistence.enabled=false \
+            --set networkPolicy.enabled=true
+
+      - name: Objects were created
+        run: |
+          kubectl get deploy,svc,sa,cm,networkpolicy -n "$NS"
+          kubectl get role,rolebinding -n "$RAY_NS"
+          kubectl get clusterrole,clusterrolebinding | grep "$NS-$RELEASE"
+
+      - name: RBAC grants what the live client calls, and nothing else
+        run: |
+          SA="system:serviceaccount:${NS}:${RELEASE}"
+          fail=0
+          # probe <verb> <resource> [namespace] [subresource]
+          probe() {
+            kubectl auth can-i "$1" "$2" --as="$SA" \
+              ${3:+-n "$3"} ${4:+--subresource="$4"} 2>/dev/null || true
+          }
+          allow() {
+            [ "$(probe "$@")" = "yes" ] || {
+              echo "DENIED (expected allow): $1 $2${4:+/$4}${3:+ in $3}"; fail=1; }
+          }
+          deny() {
+            [ "$(probe "$@")" = "yes" ] && {
+              echo "ALLOWED (expected deny): $1 $2${4:+/$4}${3:+ in $3}"; fail=1; }
+            return 0
+          }
+
+          # Cluster lifecycle: Apply (SSA = create+patch), Suspend/Resume
+          # (patch), Terminate (delete), Observe (get), List (list).
+          for verb in get list create patch delete; do
+            allow "$verb" rayclusters.ray.io "$RAY_NS"
+            allow "$verb" rayservices.ray.io "$RAY_NS"
+          done
+
+          # Tenant network posture.
+          for verb in list create patch delete; do
+            allow "$verb" networkpolicies.networking.k8s.io "$RAY_NS"
+          done
+
+          # Observability reads (nodes / logs / events tabs).
+          allow list pods "$RAY_NS"
+          allow get pods "$RAY_NS" log
+          allow list events "$RAY_NS"
+
+          # Namespace PSS labels, narrowed by resourceNames to the Ray
+          # namespace.
+          allow get "namespace/$RAY_NS"
+          allow patch "namespace/$RAY_NS"
+
+          # Kueue pool objects (cluster-scoped, or listed across namespaces).
+          for verb in list create patch delete; do
+            allow "$verb" clusterqueues.kueue.x-k8s.io
+            allow "$verb" cohorts.kueue.x-k8s.io
+            allow "$verb" resourceflavors.kueue.x-k8s.io
+            allow "$verb" localqueues.kueue.x-k8s.io
+          done
+          allow get clusterqueues.kueue.x-k8s.io
+
+          # --- and NOT more than that -------------------------------------
+          # Bifrost polls; it never opens a watch (controller-runtime is used
+          # uncached — no Manager, no informers).
+          deny watch rayclusters.ray.io "$RAY_NS"
+          deny watch rayservices.ray.io "$RAY_NS"
+          deny watch networkpolicies.networking.k8s.io "$RAY_NS"
+          # Single-object reads the live client never makes: every pod and
+          # networkpolicy read is a label-selected list.
+          deny get pods "$RAY_NS"
+          deny get networkpolicies.networking.k8s.io "$RAY_NS"
+          # Namespace access is resourceName-scoped to the Ray namespace only.
+          deny get namespaces
+          deny list namespaces
+          deny create namespaces
+          deny patch "namespace/kube-system"
+          # No Secret or pod-exec access anywhere.
+          deny get secrets "$RAY_NS"
+          deny list secrets "$RAY_NS"
+          deny create pods "$RAY_NS" exec
+          # Nothing outside the Ray namespace, and no RBAC self-inspection.
+          deny list rayclusters.ray.io kube-system
+          deny list pods kube-system
+          deny get clusterrolebindings.rbac.authorization.k8s.io
+
+          [ "$fail" -eq 0 ] || { echo "RBAC assertions failed"; exit 1; }
+          echo "RBAC matches the live client's call set"
+
+      - name: Debug info on failure
+        if: failure()
+        run: |
+          kubectl get all -n "$NS" -o wide || true
+          kubectl describe deploy -n "$NS" || true
+          kubectl get role -n "$RAY_NS" -o yaml || true
+          kubectl get clusterrole "$NS-$RELEASE" -o yaml || true
+          kubectl get events -n "$NS" --sort-by=.lastTimestamp | tail -50 || true
+
+      - name: Uninstall
+        if: always()
+        run: helm uninstall "$RELEASE" -n "$NS" || true

@@ -1,0 +1,137 @@
+Bifrost {{ .Chart.AppVersion }} deployed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+  control plane : {{ include "bifrost-pack.fullname" . }}:{{ .Values.service.port }}
+  store         : {{ .Values.store.kind }}{{ if eq .Values.store.kind "sqlite" }} (/data/bifrost.db{{ if not .Values.persistence.enabled }}, emptyDir — NOT persisted{{ end }}){{ end }}
+  auth mode     : {{ .Values.auth.mode }}
+{{- if .Values.ray.enabled }}
+  ray namespace : {{ include "bifrost-pack.rayNamespace" . }}
+{{- else }}
+  lifecycle     : DISABLED (ray.enabled=false) — API and job gateway only
+{{- end }}
+
+{{- if eq .Values.auth.mode "oidc" }}
+
+=== OIDC ===
+
+  issuer   : {{ .Values.auth.oidc.issuer }}
+  audience : {{ include "bifrost-pack.oidcAudience" . }}
+{{- if not .Values.auth.oidc.audience }}
+
+  The audience was DERIVED from the API NebariApp's provisioned Keycloak
+  client id (<namespace>-<nebariapp-name>). Nothing in this chart reads the
+  operator's {{ include "bifrost-pack.apiNebariAppName" . }}-oidc-client Secret, so first boot does not race
+  the operator's first reconcile. If Keycloak ends up issuing a different
+  `aud`, set auth.oidc.audience explicitly — otherwise every token is
+  rejected with 401.
+{{- end }}
+{{- else if eq .Values.auth.mode "local" }}
+
+=== Local auth (ADR-0011) ===
+
+{{- if .Values.auth.local.existingSecret }}
+  The bootstrap admin password comes from Secret {{ .Values.auth.local.existingSecret }}.
+{{- else if eq .Values.store.kind "sqlite" }}
+  A password for the bootstrapped `admin` user was generated on first boot and
+  written 0600 beside the database. Retrieve it:
+
+    kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "bifrost-pack.fullname" . }} -- cat /data/local-admin-password
+  {{- if not .Values.persistence.enabled }}
+
+  persistence.enabled=false: /data is an emptyDir, so both the database and
+  that password file are lost when the pod is replaced — and a new admin is
+  bootstrapped with a new password on the next boot.
+  {{- end }}
+{{- else }}
+  A password for the bootstrapped `admin` user was generated on first boot and
+  logged ONCE. With store.kind={{ .Values.store.kind }} there is no --db file path to write it
+  beside, so scrape it from the logs now, or set auth.local.existingSecret:
+
+    kubectl logs -n {{ .Release.Namespace }} deploy/{{ include "bifrost-pack.fullname" . }} | grep -i admin
+{{- end }}
+{{- else }}
+
+*** WARNING: auth.mode=none ***
+  There is NO caller authentication. Anyone who can reach :8484 can create
+  clusters and run code on every cluster Bifrost manages. Do not expose this
+  through a gateway.
+{{- end }}
+
+{{- if .Values.nebariApp.api.enabled }}
+
+=== NebariApp ===
+
+  API : https://{{ .Values.nebariApp.api.hostname }}
+{{- if .Values.nebariApp.ui.enabled }}
+  UI  : https://{{ .Values.nebariApp.ui.hostname }}
+{{- end }}
+
+  The nebari-operator ignores NebariApps in a namespace that does not carry
+  `nebari.dev/managed: "true"`. It reports nothing when it does — the CR just
+  never reconciles. Verify:
+
+    kubectl get ns {{ .Release.Namespace }} -o jsonpath='{.metadata.labels}'
+    kubectl label namespace {{ .Release.Namespace }} nebari.dev/managed=true --overwrite
+
+  Then check the CR reached Ready:
+
+    kubectl get nebariapp -n {{ .Release.Namespace }}
+    kubectl describe nebariapp {{ include "bifrost-pack.apiNebariAppName" . }} -n {{ .Release.Namespace }}
+
+{{- if not .Values.nebariApp.api.auth.enforceAtGateway }}
+
+  Gateway OIDC enforcement is OFF for the API, on purpose: Bifrost validates
+  bearer tokens itself, and a gateway SecurityPolicy would answer
+  `ray job submit` / `bifrost` CLI / curl with an HTML login redirect. The
+  operator still provisions the Keycloak client.
+{{- end }}
+{{- else }}
+
+=== Access ===
+
+  No NebariApp. Reach the API through a port-forward:
+
+    kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "bifrost-pack.fullname" . }} 8484:{{ .Values.service.port }}
+    curl -s localhost:8484/healthz
+{{- end }}
+
+{{- if .Values.ray.enabled }}
+
+=== Cluster lifecycle ===
+
+  Bifrost reconciles ONLY the RayCluster/RayService objects it owns: it lists
+  by app.kubernetes.io/managed-by=bifrost, so another operator's Ray objects
+  in {{ include "bifrost-pack.rayNamespace" . }} are invisible to it and are never reconciled or reaped.
+
+  It does, however, own the tenant NETWORK POSTURE of that namespace — a
+  default-deny plus tenant-allow scoped to pods it provisioned, and Pod
+  Security Standards labels on the namespace itself. Do not point
+  ray.namespace at a namespace another pack owns.
+{{- if ne (include "bifrost-pack.rayNamespace" .) .Release.Namespace }}
+
+  The control plane runs in {{ .Release.Namespace }} but provisions into {{ include "bifrost-pack.rayNamespace" . }}. Bifrost's
+  own tenant-allow policy admits control-plane traffic to Ray heads only from
+  pods labelled bifrost.dev/control-plane=true in a namespace labelled the
+  same way. Label the control-plane namespace or the dashboard/jobs/nodes
+  proxies will time out:
+
+    kubectl label namespace {{ .Release.Namespace }} bifrost.dev/control-plane=true --overwrite
+{{- end }}
+
+{{- if not (index .Values "kuberay-operator" "enabled") }}
+
+  kuberay-operator is NOT installed by this release (the default). Bifrost
+  needs one on the cluster:
+
+    kubectl get deploy -A -l app.kubernetes.io/name=kuberay-operator
+    kubectl get crd rayclusters.ray.io
+{{- else }}
+
+  *** kuberay-operator.enabled=true ***
+  This release vendors kuberay-operator 1.4.0. Helm installs CRDs on first
+  install only and never upgrades them: if another release already owns the
+  ray.io CRDs, this operator will run against a schema it did not install.
+  Confirm there is exactly one:
+
+    kubectl get deploy -A -l app.kubernetes.io/name=kuberay-operator
+{{- end }}
+{{- end }}
