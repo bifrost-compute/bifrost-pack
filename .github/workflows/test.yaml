@@ -95,6 +95,7 @@ jobs:
         run: |
           helm install "$RELEASE" chart \
             --namespace "$NS" \
+            --set image.tag=latest \
             --set auth.mode=local \
             --set ray.namespace="$RAY_NS" \
             --set persistence.enabled=false \
