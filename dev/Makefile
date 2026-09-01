@@ -181,6 +181,35 @@ up: cluster
 	@echo "bearer token itself. Get one with: bifrost login --issuer <realm>"
 
 # --------------------------------------------------------------------------
+# up-ui - the dashboard, which nothing else here starts
+# --------------------------------------------------------------------------
+# `ui.enabled` defaults to false, and neither `up` nor `up-standalone` passes
+# it (UI_HOSTNAME was defined but never referenced), so the dashboard
+# container was never started by any conventional run of this Makefile. That
+# is how an image/chart incompatibility reached a live cluster: stock nginx
+# runs as root and chowns /var/cache/nginx at startup, needing CAP_CHOWN,
+# which ui.yaml's `capabilities: drop: ["ALL"]` removes — CrashLoopBackOff,
+# with every port, label and template correct.
+#
+# So this target exists to start it and assert it comes up. It waits for Ready
+# rather than just applying, because that failure is only visible at runtime.
+up-ui: up
+	helm upgrade --install $(RELEASE) $(CHART_DIR) \
+		--namespace $(NAMESPACE) \
+		--reuse-values \
+		--set ui.enabled=true \
+		--set nebariApp.ui.enabled=true \
+		--set nebariApp.ui.hostname=$(UI_HOSTNAME) \
+		--wait --timeout 5m
+	kubectl wait --for=condition=Ready pod \
+		-l app.kubernetes.io/component=dashboard \
+		-n $(NAMESPACE) --timeout=180s
+	@echo ""
+	@echo "Dashboard deployed and Ready."
+	@echo "  UI:  https://$(UI_HOSTNAME)/"
+	@echo ""
+
+# --------------------------------------------------------------------------
 # up-standalone - no operator, no gateway, local (IdP-free) auth
 # --------------------------------------------------------------------------
 up-standalone:

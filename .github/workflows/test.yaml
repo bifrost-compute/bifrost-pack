@@ -15,7 +15,15 @@ name: Test
 #     verbs it does not call. An over-granted Role is the failure mode a
 #     rendering test cannot see.
 #
-# Add a pod-readiness + /healthz step here once a published image exists.
+# Add a control-plane pod-readiness + /healthz step here once a published
+# image exists for the Bifrost server.
+#
+# The DASHBOARD is different and is covered below: its image IS published
+# (ghcr.io/brandonrc/bifrost-ui), and it is the one component whose failure
+# mode a manifest test cannot see — it CrashLoopBackOff'd on a real cluster
+# because stock nginx needs CAP_CHOWN that the chart drops, with every port
+# and label correct. So the dashboard steps deliberately do run the container
+# and wait for Ready.
 
 on:
   push:
@@ -97,6 +105,49 @@ jobs:
           kubectl get deploy,svc,sa,cm,networkpolicy -n "$NS"
           kubectl get role,rolebinding -n "$RAY_NS"
           kubectl get clusterrole,clusterrolebinding | grep "$NS-$RELEASE"
+
+      # The dashboard is `ui.enabled: false` by default, so every step above
+      # this one runs without ever starting that container. That gap let an
+      # image/chart incompatibility reach a live cluster: stock nginx runs as
+      # root and chowns /var/cache/nginx at startup, which needs CAP_CHOWN,
+      # which ui.yaml's `capabilities: drop: ["ALL"]` removes. It
+      # CrashLoopBackOff'd on the first real deployment.
+      #
+      # A template-level check could not have caught it — the ports agreed; the
+      # container simply could not start. Only running it can, so this step
+      # runs it and waits for Ready. It is deliberately the one place in this
+      # workflow that uses --wait.
+      - name: Dashboard starts under the chart's own security context
+        run: |
+          helm upgrade "$RELEASE" chart \
+            --namespace "$NS" \
+            --reuse-values \
+            --set ui.enabled=true \
+            --wait --timeout 5m
+          kubectl wait --for=condition=Ready pod \
+            -l app.kubernetes.io/component=dashboard \
+            -n "$NS" --timeout=120s
+          kubectl get pods -n "$NS" -l app.kubernetes.io/component=dashboard
+
+      - name: Dashboard serves the SPA and its port contract holds
+        run: |
+          # The four places the port is named must agree: the image's baked
+          # nginx.conf listen, the containerPort, the Service targetPort and
+          # the ConfigMap's listen. A subset changing is a silent 502, so
+          # assert an actual response rather than the manifest.
+          # The Service name comes from fullnameOverride (`bifrost`), not the
+          # release name, so it is `bifrost-ui` regardless of $RELEASE.
+          kubectl run ui-probe --rm -i --restart=Never -n "$NS" \
+            --image=curlimages/curl:latest --command -- \
+            curl -sS -o /dev/null -w '%{http_code}' "http://bifrost-ui/" \
+            | tee /tmp/ui_code
+          grep -q '^200' /tmp/ui_code
+
+      - name: Dashboard debug on failure
+        if: failure()
+        run: |
+          kubectl describe pod -n "$NS" -l app.kubernetes.io/component=dashboard || true
+          kubectl logs -n "$NS" -l app.kubernetes.io/component=dashboard --tail=50 || true
 
       - name: RBAC grants what the live client calls, and nothing else
         run: |
