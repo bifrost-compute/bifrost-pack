@@ -94,6 +94,9 @@ spec:
             {{- end }}
             {{- if eq .Values.auth.mode "oidc" }}
             - --auth-config=/etc/bifrost/auth/auth.json
+            {{- if include "bifrost-pack.localAuthEnabled" . }}
+            - --local-auth
+            {{- end }}
             {{- else if eq .Values.auth.mode "local" }}
             - --local-auth
             {{- else }}
@@ -116,7 +119,7 @@ spec:
             - --reconcile-interval={{ . }}
             {{- end }}
             {{- end }}
-          {{- if and (eq .Values.auth.mode "local") .Values.auth.local.existingSecret }}
+          {{- if and (include "bifrost-pack.localAuthEnabled" .) .Values.auth.local.existingSecret }}
           env:
             - name: BIFROST_LOCAL_ADMIN_PASSWORD
               valueFrom:

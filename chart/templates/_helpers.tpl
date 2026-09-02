@@ -124,6 +124,40 @@ Note that (2) means turning nebariApp.api on CHANGES the expected audience.
 That is intended — the provisioned client is the one issuing the tokens — but
 it is why NOTES.txt prints the effective value on every install and upgrade.
 */}}
+{{/*
+Whether `--local-auth` is on: auth.mode=local always; auth.mode=oidc when
+auth.local.enabled. The binary accepts both flags together (local users and
+bfr_ PATs beside OIDC bearers); the chart used to force a choice.
+*/}}
+{{- define "bifrost-pack.localAuthEnabled" -}}
+{{- if or (eq .Values.auth.mode "local") (and (eq .Values.auth.mode "oidc") .Values.auth.local.enabled) -}}true{{- end -}}
+{{- end }}
+
+{{/*
+The OIDC public client id the dashboard SPA authenticates as, served at
+/config.json. Explicit ui.sso.clientId wins; otherwise the SPA client the
+operator provisions for the UI NebariApp (spaClient.clientID, or the derived
+<namespace>-<ui-nebariapp-name>-spa — nebari-operator GetSPAClientID);
+otherwise the UI's compiled default.
+*/}}
+{{- define "bifrost-pack.uiSsoClientId" -}}
+{{- if .Values.ui.sso.clientId -}}
+{{- .Values.ui.sso.clientId -}}
+{{- else if and .Values.nebariApp.ui.enabled .Values.nebariApp.ui.auth.enabled .Values.nebariApp.ui.auth.spaClient.enabled -}}
+{{- .Values.nebariApp.ui.auth.spaClient.clientID | default (printf "%s-%s-spa" .Release.Namespace (include "bifrost-pack.uiNebariAppName" .)) -}}
+{{- else -}}
+{{- "bifrost" -}}
+{{- end -}}
+{{- end }}
+
+{{- define "bifrost-pack.uiSsoIssuer" -}}
+{{- if .Values.ui.sso.issuer -}}
+{{- .Values.ui.sso.issuer -}}
+{{- else if eq .Values.auth.mode "oidc" -}}
+{{- .Values.auth.oidc.issuer -}}
+{{- end -}}
+{{- end }}
+
 {{- define "bifrost-pack.oidcAudience" -}}
 {{- if .Values.auth.oidc.audience -}}
 {{- .Values.auth.oidc.audience -}}

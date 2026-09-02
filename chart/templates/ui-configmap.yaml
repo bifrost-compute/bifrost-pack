@@ -30,6 +30,8 @@ data:
   #
   # NGINX_ENVSUBST_FILTER on the Deployment restricts substitution to
   # NGINX_* so nginx's own $host / $http_upgrade etc. survive envsubst.
+  config.json: |
+    {{ dict "ssoClientId" (include "bifrost-pack.uiSsoClientId" .) "issuer" (include "bifrost-pack.uiSsoIssuer" .) | toJson }}
   default.conf.template: |
     server {
         # Must match the image's own listen and the Deployment's
@@ -57,6 +59,13 @@ data:
         }
         location = /healthz {
             proxy_pass $bifrost_upstream;
+        }
+        # Deployment config the SPA reads before first render (OIDC client
+        # id / issuer). Rendered from values below, mounted by ui.yaml.
+        location = /config.json {
+            alias /etc/bifrost-ui/config.json;
+            default_type application/json;
+            add_header Cache-Control "no-store";
         }
         location /docs {
             proxy_pass $bifrost_upstream;

@@ -160,6 +160,12 @@ auth:
     #   stripPrefix: "/"   # Keycloak "/team-a" groups -> project:team-a
 
   local:
+    # With auth.mode=oidc, ALSO enable local username/password auth
+    # (`--local-auth`) beside OIDC: bfr_ PATs, the bifrost-jupyter dev
+    # fallback and an IdP-independent admin login need it. The binary takes
+    # both flags together; the chart used to force a choice. Ignored when
+    # auth.mode=local (always on) or none.
+    enabled: false
     # Optional Secret providing the bootstrap admin password; its
     # `passwordKey` becomes BIFROST_LOCAL_ADMIN_PASSWORD.
     existingSecret: ""
@@ -331,6 +337,14 @@ ui:
   # standing lesson: any verification of this chart must run at least once
   # with `ui.enabled=true`, or this whole path is untested.
   enabled: false
+  # Served to the SPA as /config.json at runtime (bifrost-ui reads it before
+  # first render, so the published image needs no per-deployment build).
+  # Empty values are derived: clientId from the SPA client the operator
+  # provisions for nebariApp.ui (<namespace>-<nebariapp>-spa, or
+  # spaClient.clientID); issuer from auth.oidc.issuer when auth.mode=oidc.
+  sso:
+    clientId: ""
+    issuer: ""
   image:
     repository: ghcr.io/brandonrc/bifrost-ui
     tag: latest
