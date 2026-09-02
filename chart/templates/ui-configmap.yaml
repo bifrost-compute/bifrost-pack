@@ -4,10 +4,10 @@
 # The image bakes an nginx.conf that proxies /api/, /healthz and /docs to a
 # hardcoded `http://bifrost:8484` — its docker-compose service name, which
 # does not exist in a Helm release whose Service is named anything else. This
-# ConfigMap is mounted over /etc/nginx/conf.d/default.conf to point at this
-# release's control-plane Service instead. Everything else (SPA fallback,
-# WebSocket upgrade for the log-tail bridge, the long read timeout) is copied
-# from the image's own conf so behaviour matches.
+# ConfigMap ships the replacement conf, pointed at this release's
+# control-plane Service instead. Everything else (SPA fallback, WebSocket
+# upgrade for the log-tail bridge, the long read timeout) is copied from the
+# image's own conf so behaviour matches.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -15,7 +15,22 @@ metadata:
   labels:
     {{- include "bifrost-pack.ui.labels" . | nindent 4 }}
 data:
-  default.conf: |
+  # Shipped as a TEMPLATE, not a finished conf. The nginx image's entrypoint
+  # (20-envsubst-on-templates.sh) renders /etc/nginx/templates/*.template
+  # into /etc/nginx/conf.d/ at boot, and 15-local-resolvers.envsh exports
+  # NGINX_LOCAL_RESOLVERS from the pod's /etc/resolv.conf. That gives nginx
+  # the cluster DNS address without the chart hardcoding one.
+  #
+  # Why: nginx resolves a literal proxy_pass target (a bare "http" URL naming
+  # the upstream host) ONCE, at startup, and exits with "host not found in
+  # upstream" if DNS is not yet answering. On a node reboot CoreDNS is rarely
+  # first; the dashboard crash-looped on Grace for exactly this reason
+  # (2026-09-02). A `resolver` plus a variable upstream defers resolution to
+  # request time.
+  #
+  # NGINX_ENVSUBST_FILTER on the Deployment restricts substitution to
+  # NGINX_* so nginx's own $host / $http_upgrade etc. survive envsubst.
+  default.conf.template: |
     server {
         # Must match the image's own listen and the Deployment's
         # containerPort: the dashboard image is nginx-unprivileged (uid 101),
@@ -26,8 +41,11 @@ data:
         root /usr/share/nginx/html;
         index index.html;
 
+        resolver ${NGINX_LOCAL_RESOLVERS} valid=10s ipv6=off;
+        set $bifrost_upstream http://{{ include "bifrost-pack.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }};
+
         location /api/ {
-            proxy_pass http://{{ include "bifrost-pack.fullname" . }}:{{ .Values.service.port }};
+            proxy_pass $bifrost_upstream;
             proxy_set_header Host $host;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
@@ -38,10 +56,10 @@ data:
             proxy_read_timeout 3600s;
         }
         location = /healthz {
-            proxy_pass http://{{ include "bifrost-pack.fullname" . }}:{{ .Values.service.port }};
+            proxy_pass $bifrost_upstream;
         }
         location /docs {
-            proxy_pass http://{{ include "bifrost-pack.fullname" . }}:{{ .Values.service.port }};
+            proxy_pass $bifrost_upstream;
             proxy_set_header Host $host;
         }
 
