@@ -110,6 +110,15 @@ spec:
             {{- if .Values.clusters }}
             - --registry=/etc/bifrost/registry/clusters.json
             {{- end }}
+            {{- with .Values.gateway.domain }}
+            # Dynamic gateway registration: provisioned clusters and Serve
+            # endpoints become routable as `<name>.<domain>` while they live.
+            # Omitted when empty, which leaves only the static registry.
+            - --gateway-domain={{ . }}
+            {{- end }}
+            {{- with .Values.gateway.externalBase }}
+            - --gateway-external-base={{ . }}
+            {{- end }}
             {{- with .Values.admission.allowedImages }}
             - --allowed-images={{ join "," . }}
             {{- end }}
@@ -118,6 +127,11 @@ spec:
             {{- end }}
             {{- with .Values.metering.interval }}
             - --metering-interval={{ . }}
+            {{- end }}
+            {{- if ne (int .Values.services.perProject) 1 }}
+            # One service per project is the binary's default; only an
+            # explicit deviation is worth putting in the pod spec.
+            - --services-per-project={{ .Values.services.perProject }}
             {{- end }}
             {{- if .Values.ray.enabled }}
             - --namespace={{ include "bifrost-pack.rayNamespace" . }}

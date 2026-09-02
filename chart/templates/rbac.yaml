@@ -31,9 +31,30 @@ rules:
   # the app.kubernetes.io/managed-by=bifrost selector).
   # RayService: Deploy (SSA -> create+patch), Get (get), Delete (delete),
   # List (list, same ownership selector).
+  # RayJob (requirement 5, ephemeral clusters): ApplyJob (SSA -> create+patch),
+  # ObserveJob (get), DeleteJob (delete — KubeRay then removes the RayCluster
+  # the job owns; Bifrost never deletes that cluster itself), ListJobs (list,
+  # same ownership selector). Identical verb set, so one rule.
   - apiGroups: ["ray.io"]
-    resources: ["rayclusters", "rayservices"]
+    resources: ["rayclusters", "rayservices", "rayjobs"]
     verbs: ["get", "list", "create", "patch", "delete"]
+
+  # Secrets (requirement 12, private storage): `get` ONLY, and used ONLY as a
+  # metadata existence check. Administrators catalog Secret NAMES as storage
+  # entries; before applying a cluster/service/job that references one, the
+  # live client GETs it as a metav1.PartialObjectMetadata so a typo surfaces
+  # as a Bifrost condition ("secret X not found") instead of a pod stuck in
+  # CreateContainerConfigError. The Secret's data reaches pods through
+  # envFrom.secretRef / a secret volume that the kubelet resolves — Bifrost
+  # never reads, stores, logs or returns a Secret value. Be clear about what
+  # RBAC can and cannot say here: Kubernetes has no metadata-only verb, so
+  # this grant WOULD let the service account read Secret data; the
+  # metadata-only property is a code-path guarantee (PartialObjectMetadata),
+  # not an RBAC one. No `list` (each check is by name), and none of
+  # create/patch/delete (Bifrost does not manage Secrets).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
 
   # NetworkPolicy: Bifrost owns the tenant network posture in this namespace —
   # a default-deny plus a tenant-allow scoped to pods it provisioned, and one

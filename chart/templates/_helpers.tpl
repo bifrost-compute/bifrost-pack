@@ -193,6 +193,12 @@ fails at `helm template`/`helm install` rather than in a CrashLoopBackOff.
 {{- if and (ne .Values.store.kind "postgres") (gt (int .Values.replicaCount) 1) -}}
 {{- fail "replicaCount>1 requires store.kind=postgres (memory is per-pod; SQLite is a single writer on an RWO PVC)" -}}
 {{- end -}}
+{{- if and .Values.gateway.externalBase (not .Values.gateway.domain) -}}
+{{- fail "gateway.externalBase only prefixes the `<name>.<gateway.domain>` hostname Bifrost reports as gateway_url; set gateway.domain (which turns dynamic registration on) or clear gateway.externalBase" -}}
+{{- end -}}
+{{- if lt (int .Values.services.perProject) 1 -}}
+{{- fail (printf "services.perProject must be >= 1 (1 = one Serve application per project, the design; higher is the escape hatch), got %v" .Values.services.perProject) -}}
+{{- end -}}
 {{/*
 Constraint: the `ray` namespace on a Nebari cluster is occupied by
 rayserve-pack's `shared` release (Grace). Two controllers reconciling one

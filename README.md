@@ -147,7 +147,8 @@ summary:
 
 | Scope | Resource | Verbs | Why |
 | --- | --- | --- | --- |
-| Ray namespace | `ray.io` rayclusters, rayservices | get, list, create, patch, delete | SSA apply, suspend/resume patch, observe, ownership-scoped list, terminate |
+| Ray namespace | `ray.io` rayclusters, rayservices, rayjobs | get, list, create, patch, delete | SSA apply, suspend/resume patch, observe, ownership-scoped list, terminate. `rayjobs` is requirement 5: an ephemeral RayJob whose cluster KubeRay removes when the job finishes |
+| Ray namespace | secrets | get | Requirement 12: a metadata-only existence check (`PartialObjectMetadata`) on a cataloged Secret name before a cluster, service or job that references it is applied, so a typo is a Bifrost condition rather than `CreateContainerConfigError`. Kubernetes has no metadata-only verb, so RBAC cannot express that limit; the code path does. No list, create, patch or delete |
 | Ray namespace | networkpolicies | list, create, patch, delete | Tenant default-deny / tenant-allow / per-cluster allow, plus the admin-managed-deny probe |
 | Ray namespace | pods | list | Node breakdown and log-target resolution, by label |
 | Ray namespace | pods/log | get | The logs tab |
@@ -158,10 +159,12 @@ summary:
 
 Deliberately absent: any `watch` verb (Bifrost polls — controller-runtime is
 used uncached, no Manager, no informers), `get` on pods or networkpolicies
-(every read is a label-selected list), cluster-wide namespace access, and
-anything touching Secrets or `pods/exec`. `.github/workflows/test.yaml`
-asserts both halves — that each granted verb is allowed, and that the absent
-ones are denied.
+(every read is a label-selected list), cluster-wide namespace access,
+`pods/exec`, and every Secrets verb but `get` (Bifrost never creates or
+edits a Secret, and never reads one's data — the values reach Ray pods
+through `envFrom.secretRef` and secret volumes the kubelet resolves).
+`.github/workflows/test.yaml` asserts both halves — that each granted verb
+is allowed, and that the absent ones are denied.
 
 ## Configuration
 
@@ -178,6 +181,9 @@ reasoning. The ones you will actually set:
 | `ray.namespace` | release namespace | Where RayClusters land. Not `ray` |
 | `nebariApp.api.hostname` | — | Required when `nebariApp.api.enabled` |
 | `ui.enabled` | `false` | Dashboard; SSO config is served at runtime (`ui.sso.*`) |
+| `gateway.domain` | `` (off) | Requirement 5 and the Serve half of 1/2: turns on dynamic gateway registration; provisioned clusters, running jobs and Serve endpoints answer as `<name>.<domain>` (Host-header matched). Empty leaves only the static `clusters` registry |
+| `gateway.externalBase` | `` | Scheme-and-authority prefix (e.g. `https://`) Bifrost puts before that hostname in the `gateway_url` it reports. Labels responses only; requires `gateway.domain` |
+| `services.perProject` | `1` | Requirements 1/2: live Ray Serve applications per project. `1` is the design (a second name is `409` until the first is deleted; the same name redeploys); the flag is rendered only when raised |
 
 Flags the Rust predecessor had and Bifrost deliberately did not port — `--policy`,
 `--audit-log`, `--metering-interval-secs`, `--demo` — have no values here.

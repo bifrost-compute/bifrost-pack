@@ -8,6 +8,9 @@ Bifrost {{ .Chart.AppVersion }} deployed as release {{ .Release.Name }} in names
 {{- else }}
   lifecycle     : DISABLED (ray.enabled=false) — API and job gateway only
 {{- end }}
+{{- with .Values.gateway.domain }}
+  gateway       : dynamic registration ON — provisioned clusters, jobs and Serve endpoints answer as <name>.{{ . }}
+{{- end }}
 
 {{- if eq .Values.auth.mode "oidc" }}
 

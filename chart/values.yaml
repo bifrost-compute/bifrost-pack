@@ -195,6 +195,18 @@ metering:
   # How often a usage sample is recorded per running cluster (Go duration).
   interval: 1m
 
+# --- Group model serving ----------------------------------------------------
+# Requirements 1 and 2: a group (project) deploys one Ray Serve application
+# and its members reach it through the gateway. `--services-per-project` is
+# the cap on live services per project; the default of 1 is the design (a
+# second deploy under a different name is refused with 409 until the first is
+# deleted — redeploying the SAME name is an update). Raise it only as an
+# escape hatch for a project that genuinely runs several applications; the
+# flag is omitted from the pod spec while it is 1, so the binary's default
+# governs.
+services:
+  perProject: 1
+
 # --- Cluster lifecycle (KubeRay + Kueue) ------------------------------------
 ray:
   # Enables `serve --namespace=<ns>`: the reconciler, the pool reconciler, and
@@ -291,6 +303,33 @@ clusters: []
 # Name of a Secret whose keys become environment variables on the bifrost
 # container (envFrom). Point clusters[].authTokenEnv at those keys.
 registryTokenSecret: ""
+
+# --- Dynamic gateway registration (ephemeral jobs and Serve) ----------------
+# Requirement 5 (ephemeral RayJob) and the Serve half of requirements 1/2:
+# clusters Bifrost provisions itself — a RayJob's cluster while it runs, a
+# RayCluster, a RayService's serve endpoint — are added to the gateway
+# registry as they come up and removed as they go, alongside the static
+# `clusters` above. Each is addressed by Host header as `<name>.<domain>`.
+#
+# domain: the DNS suffix the gateway matches on. Empty (the default) keeps
+# dynamic registration OFF — only the static registry is routable, exactly as
+# before. Routing the wildcard `*.<domain>` to the control plane Service is
+# an ingress/NebariApp concern outside this chart for now; on a cluster
+# without wildcard DNS the entries are still reachable with an explicit
+# `Host:` header against the Service.
+#
+# externalBase: the scheme-and-authority prefix Bifrost puts in front of that
+# hostname when it reports `gateway_url` to callers, e.g. "https://". It only
+# labels responses — nothing is routed by it — and it is meaningless without
+# a domain, so setting it alone fails at template time.
+gateway:
+  domain: ""
+  externalBase: ""
+
+# Dask (requirement 16) is deferred, and so is its `dask.enabled` toggle. The
+# flag (`--dask`) and the `kubernetes.dask.org` daskclusters RBAC rule are
+# added here in the same change that adds them to `bifrost serve`, never
+# ahead of it — this chart does not render flags the binary cannot parse.
 
 # --- Network policy ---------------------------------------------------------
 # Ingress policy for the control plane itself. This is NOT the tenant policy
