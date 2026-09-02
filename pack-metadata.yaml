@@ -32,13 +32,16 @@ scope:
   standalone-supported: yes
 
 demo_notes: |
-  Go successor to mobula; supersedes mobula-pack. On a shared cluster keep
-  kuberay-operator.enabled=false (Grace runs 1.4.0; Helm never upgrades CRDs)
-  and keep ray.namespace off `ray` (rayserve-pack owns it; templating
-  refuses it). Gateway OIDC is off for the API on purpose: Bifrost validates
-  bearer tokens itself, so a SecurityPolicy would answer `ray job submit`
-  with a login redirect. BLOCKERS: no server image is published yet, and the
-  dashboard SSO needs a bifrost-ui fix.
+  Go successor to mobula; supersedes mobula-pack, which has now been fully
+  removed from Grace (release, namespace, PVCs and orphaned RayCluster).
+  On a shared cluster keep kuberay-operator.enabled=false (Grace runs 1.4.0;
+  Helm never upgrades CRDs) and keep ray.namespace off `ray` (rayserve-pack
+  owns it; templating refuses it). Gateway OIDC is off for the API on
+  purpose: Bifrost validates bearer tokens itself, so a SecurityPolicy would
+  answer `ray job submit` with a login redirect. `image.tag` is required —
+  bifrost publishes `sha-<short>` and `latest`; AppVersion is not a tag.
+  Deployed and verified on Grace: login mints a `bfr_` PAT, create returns
+  201, the RayCluster provisions and the per-cluster NetworkPolicy applies.
 
 links:
   docs: https://github.com/brandonrc/bifrost-pack/blob/main/README.md

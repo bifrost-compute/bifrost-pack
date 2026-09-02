@@ -14,13 +14,16 @@ This repo is the pack: one Helm chart under [`chart/`](chart/) plus the
 [`pack-metadata.yaml`](pack-metadata.yaml) the Nebari pack dashboard scrapes.
 It is the successor to `mobula-pack` (Bifrost is the Go port of mobula).
 
-> **Status: experimental.** Two things are not ready. There is no published
-> container image for the Bifrost server — the [bifrost
-> repo](https://github.com/brandonrc/bifrost) has a Dockerfile but no workflow
-> that pushes one, so you must build and push it yourself. And the dashboard's
-> SSO login is blocked on a hardcoded OIDC client id in `bifrost-ui`. Both are
-> called out in [`chart/values.yaml`](chart/values.yaml) at the values they
-> affect.
+> **Status: experimental.** Both of the blockers this section used to list are
+> now cleared. The [bifrost repo](https://github.com/brandonrc/bifrost)
+> publishes `ghcr.io/brandonrc/bifrost` on every push to `main`, tagged
+> `sha-<short>` (immutable, preferred) and `latest` — `image.tag` is required,
+> because `.Chart.AppVersion` is *not* a published tag. The dashboard's OIDC
+> client id is configurable via `VITE_BIFROST_SSO_CLIENT_ID`, so it can match
+> an operator-provisioned Keycloak client instead of a hardcoded name.
+>
+> Still experimental for the reasons in the requirement table: ephemeral
+> RayJob, group model serving, and the serving resource pool are not built.
 
 ## What gets deployed
 
