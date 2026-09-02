@@ -81,6 +81,15 @@ spec:
             # $http_upgrade, $uri... must not be substituted away.
             - name: NGINX_ENVSUBST_FILTER
               value: "^NGINX_"
+            # The image's 15-local-resolvers.envsh exports
+            # NGINX_LOCAL_RESOLVERS from /etc/resolv.conf ONLY when this
+            # opt-in is set; without it the template's
+            # `resolver ${NGINX_LOCAL_RESOLVERS}` is rendered literally and
+            # nginx dies with `host not found in resolver
+            # "${NGINX_LOCAL_RESOLVERS}"`. Found on Grace 2026-09-02 when
+            # release revision 8 crash-looped the dashboard.
+            - name: NGINX_ENTRYPOINT_LOCAL_RESOLVERS
+              value: "1"
           volumeMounts:
             - name: nginx-template
               mountPath: /etc/nginx/templates/default.conf.template
