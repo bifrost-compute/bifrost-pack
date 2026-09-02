@@ -181,6 +181,20 @@ auth:
 # if every registered api_base_url is https.
 allowInsecureTransport: true
 
+# --- Administrator controls and metering -------------------------------------
+# Requirement 7 (which images and how many workers a cluster may ask for) and
+# requirement 14 (usage samples), passed to `bifrost serve`. The frozen API has
+# no operation to edit these: they are deployment configuration by design.
+admission:
+  # Image prefixes a cluster may request, e.g. ["rayproject/", "registry.example.com/ml/"].
+  # Empty = any image.
+  allowedImages: []
+  # Cap on the sum of max_replicas across a cluster's worker groups. 0 = no cap.
+  maxWorkers: 0
+metering:
+  # How often a usage sample is recorded per running cluster (Go duration).
+  interval: 1m
+
 # --- Cluster lifecycle (KubeRay + Kueue) ------------------------------------
 ray:
   # Enables `serve --namespace=<ns>`: the reconciler, the pool reconciler, and

@@ -110,6 +110,15 @@ spec:
             {{- if .Values.clusters }}
             - --registry=/etc/bifrost/registry/clusters.json
             {{- end }}
+            {{- with .Values.admission.allowedImages }}
+            - --allowed-images={{ join "," . }}
+            {{- end }}
+            {{- if .Values.admission.maxWorkers }}
+            - --max-workers={{ .Values.admission.maxWorkers }}
+            {{- end }}
+            {{- with .Values.metering.interval }}
+            - --metering-interval={{ . }}
+            {{- end }}
             {{- if .Values.ray.enabled }}
             - --namespace={{ include "bifrost-pack.rayNamespace" . }}
             {{- if .Values.ray.autoscaling }}
