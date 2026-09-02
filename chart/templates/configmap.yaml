@@ -2,7 +2,7 @@
 # OIDC validator config for `serve --auth-config`.
 #
 # JSON, not TOML: auth.AuthConfig carries `json` struct tags and
-# cmd/bifrost/authconfig.go decodes with encoding/json. mobula's auth.toml has
+# cmd/bifrost/authconfig.go decodes with encoding/json. The predecessor's auth.toml has
 # no equivalent here.
 #
 # The audience is computed at template time — see "bifrost-pack.oidcAudience"
@@ -47,7 +47,7 @@ data:
 ---
 # Static cluster registry for the federating Jobs gateway
 # (`serve --registry`). JSON, matching core.ClusterRegistry's `json` tags —
-# cmd/bifrost/registry.go decodes with encoding/json; mobula's clusters.toml
+# cmd/bifrost/registry.go decodes with encoding/json; the predecessor's clusters.toml
 # has no equivalent here.
 #
 # This is a ConfigMap, not a Secret. Prefer authTokenEnv (the NAME of an env

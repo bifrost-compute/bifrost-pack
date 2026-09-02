@@ -8,9 +8,9 @@
 # Ray Jobs gateway.
 #
 # Every flag rendered by this chart exists on `bifrost serve`
-# (cmd/bifrost/serve.go). Flags mobula had but Bifrost deliberately did NOT
+# (cmd/bifrost/serve.go). Flags the Rust predecessor had but Bifrost deliberately did NOT
 # port — --policy, --audit-log, --metering-interval-secs, --demo — have no
-# values here on purpose. If you are migrating from mobula-pack, those knobs
+# values here on purpose. If you are migrating from the predecessor pack, those knobs
 # are gone, not renamed.
 
 # Short, predictable object names ("bifrost", "bifrost-ui") regardless of the
@@ -62,7 +62,7 @@ replicaCount: 1
 bind: 0.0.0.0:8484
 
 # --- Desired-state store ----------------------------------------------------
-# `bifrost serve --store <kind> [--db <dsn>]`. Unlike mobula, the backend is an
+# `bifrost serve --store <kind> [--db <dsn>]`. Unlike the Rust predecessor, the backend is an
 # explicit choice, not sniffed from the DSN prefix.
 #   memory   - no persistence. Cluster ownership and audit history are lost on
 #              pod replacement; the reconciler rebuilds observed state from the
@@ -81,7 +81,7 @@ store:
     # line argument — there is no env-var or file indirection in
     # cmd/bifrost/serve.go. The password is therefore visible in the pod spec
     # (`kubectl get pod -o yaml`) to anyone with pod read in this namespace.
-    # This is inherited from mobula and is a tracked backend change, not
+    # This is inherited from the Rust predecessor and is a tracked backend change, not
     # something the chart can fix without a shell wrapper. Use a dedicated,
     # rotatable role.
     dsn: ""
@@ -98,7 +98,7 @@ persistence:
 # --- Authentication ---------------------------------------------------------
 # auth.mode selects how callers authenticate to the control plane:
 #   oidc  - (default) validate bearer JWTs against auth.oidc.*. Rendered to
-#           auth.json and passed `--auth-config`. NOTE: JSON, not mobula's
+#           auth.json and passed `--auth-config`. NOTE: JSON, not the predecessor's
 #           TOML (cmd/bifrost/authconfig.go).
 #   local - IdP-free username/password auth (ADR-0011): `--local-auth`. On
 #           first boot an `admin` user is bootstrapped; the password comes
@@ -311,16 +311,13 @@ affinity: {}
 # service name), so this chart mounts its own rendered default.conf over it,
 # pointing at this release's control-plane Service.
 #
-# OFF BY DEFAULT for this first cut. Two things must land upstream before the
-# dashboard's SSO path works on a Nebari cluster:
-#   1. bifrost-ui/src/lib/pkce.ts hardcodes `SSO_CLIENT_ID = 'mobula'`. There
-#      is no build- or run-time override, so the SPA cannot use a Keycloak
-#      client the nebari-operator provisions (which would be
-#      `<namespace>-<nebariapp-name>-spa`).
-#   2. The token the SPA obtains must carry an `aud` Bifrost accepts. Today
-#      that means either pointing auth.oidc.audience at the SPA client, or a
-#      Keycloak audience mapper — neither is expressible without (1).
-# The local-auth login form (auth.mode=local) works today and is unaffected.
+# SSO: the SPA reads its OIDC client id and issuer at runtime from
+# /config.json (ui.sso.*, derived from the UI NebariApp's SPA client and
+# auth.oidc.issuer). The token the SPA obtains must carry an `aud` Bifrost
+# accepts (auth.oidc.audience): the nebari-operator currently provisions the
+# SPA client WITHOUT an audience or groups mapper, so until that lands the
+# two mappers are added to the client by hand (Grace, 2026-09-02). The
+# local-auth login form works alongside (auth.local.enabled).
 ui:
   # OFF by default — and that default is a testing hazard worth stating,
   # because it hid a real bug.

@@ -12,7 +12,7 @@ job endpoint directly.
 
 This repo is the pack: one Helm chart under [`chart/`](chart/) plus the
 [`pack-metadata.yaml`](pack-metadata.yaml) the Nebari pack dashboard scrapes.
-It is the successor to `mobula-pack` (Bifrost is the Go port of mobula).
+It is the successor to `mobula-pack`, the pack for Bifrost's Rust predecessor.
 
 > **Status: experimental.** Both of the blockers this section used to list are
 > now cleared. The [bifrost repo](https://github.com/brandonrc/bifrost)
@@ -177,9 +177,9 @@ reasoning. The ones you will actually set:
 | `store.kind` | `sqlite` | `memory` \| `sqlite` \| `postgres`; `postgres` is the only one that supports `replicaCount > 1` |
 | `ray.namespace` | release namespace | Where RayClusters land. Not `ray` |
 | `nebariApp.api.hostname` | — | Required when `nebariApp.api.enabled` |
-| `ui.enabled` | `false` | Dashboard; see the SSO blocker above |
+| `ui.enabled` | `false` | Dashboard; SSO config is served at runtime (`ui.sso.*`) |
 
-Flags that mobula had and Bifrost deliberately did not port — `--policy`,
+Flags the Rust predecessor had and Bifrost deliberately did not port — `--policy`,
 `--audit-log`, `--metering-interval-secs`, `--demo` — have no values here.
 They are gone, not renamed.
 
@@ -189,11 +189,15 @@ They are gone, not renamed.
   workflow pushes it.
 - **Postgres DSN is visible in the pod spec.** `bifrost serve` accepts `--db`
   only as a command-line argument — no env or file indirection — so the
-  password shows up in `kubectl get pod -o yaml`. Inherited from mobula; needs
+  password shows up in `kubectl get pod -o yaml`. Inherited from the predecessor; needs
   a server change, not a chart change.
-- **Dashboard SSO.** `bifrost-ui` hardcodes `SSO_CLIENT_ID = 'mobula'` with no
-  build- or run-time override, so the SPA cannot use an operator-provisioned
-  Keycloak client. The local-auth login form works today.
+- **SPA client mappers.** The nebari-operator provisions the dashboard's
+  public SPA client with neither an audience mapper nor a groups mapper, so
+  its tokens carry `aud: account` and no `groups` and Bifrost rejects them.
+  Until the operator adds them (it already does for its device-flow client),
+  add an `oidc-audience-mapper` (included client = the SPA client id) and an
+  `oidc-group-membership-mapper` (claim `groups`, full path off) to the
+  client by hand. The runtime config itself (`/config.json`) is in place.
 - **Kueue must serve `v1beta2`.** Bifrost probes for
   `kueue.x-k8s.io/v1beta2` specifically. Against an older Kueue the probe
   fails and the pool reconciler never starts, with one INFO line to say so.
