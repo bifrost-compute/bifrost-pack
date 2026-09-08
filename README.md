@@ -189,6 +189,31 @@ Flags the Rust predecessor had and Bifrost deliberately did not port — `--poli
 `--audit-log`, `--metering-interval-secs`, `--demo` — have no values here.
 They are gone, not renamed.
 
+## Observability
+
+`observability.enabled=true` renders what a Prometheus-operator stack needs to
+scrape Bifrost and every Ray cluster it provisions, plus the Grafana dashboard
+that reads the result:
+
+- a `ServiceMonitor` for `GET /api/v1/metrics` — Read on the cluster target, so
+  the scraper needs an identity: a local `viewer` user's PAT in the Secret named
+  by `observability.api.secretName`, in the monitors' namespace;
+- a `PodMonitor` for every Ray head and worker (`ray.io/is-ray-node=yes`, port
+  `metrics`), relabelling `bifrost.dev/cluster-id` and `bifrost.dev/owner` onto
+  every series so the dashboard slices by tenant;
+- the one `NetworkPolicy` Bifrost's tenant posture does not grant — the
+  scraper's namespace to `:8080` on Ray pods (without it, every Ray target times
+  out);
+- optionally (`observability.gateway.enabled`) the platform gateway's per-route
+  request series, everything else dropped at scrape time;
+- the **Bifrost platform** dashboard as a ConfigMap for the Grafana dashboards
+  sidecar, its datasource uid rewritten to `observability.dashboard.datasourceUid`.
+
+The dashboard's source of truth is `bifrost/deploy/grafana/`;
+`scripts/sync-dashboard.sh` copies it into `chart/dashboards/` before a release.
+The standalone form of the same wiring, as applied on grace, is in
+`bifrost/deploy/observability/`.
+
 ## Known gaps
 
 - **No published server image.** The Dockerfile exists in the bifrost repo; no

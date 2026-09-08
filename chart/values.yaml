@@ -511,3 +511,58 @@ nebariApp:
         path: /healthz
         intervalSeconds: 30
         timeoutSeconds: 5
+
+# -----------------------------------------------------------------------------
+# Observability: how a Prometheus stack scrapes Bifrost and the Ray clusters it
+# provisions, and the Grafana dashboard that reads the result.
+#
+# Off by default: it needs the prometheus-operator CRDs (ServiceMonitor,
+# PodMonitor) and a Grafana with the dashboards sidecar. Everything here was
+# first wired by hand on a live deployment and then written down; the point of
+# templating it is that the next deployment gets it by flipping one value.
+# -----------------------------------------------------------------------------
+observability:
+  enabled: false
+  # Where the ServiceMonitor/PodMonitors are created and where Prometheus runs.
+  # The bearer-token Secret must live in this namespace too (operator rule).
+  namespace: observability
+  # The label the operator's Prometheus selects monitors by
+  # (spec.serviceMonitorSelector / podMonitorSelector).
+  prometheusReleaseLabel: kube-prom-stack
+  api:
+    # GET /api/v1/metrics is Read on the cluster target: the scraper needs an
+    # identity. Make a local `viewer` user for it and mint a PAT
+    # (POST /api/v1/auth/tokens), then:
+    #   kubectl -n <namespace> create secret generic <secretName> --from-literal=token=bfr_...
+    secretName: bifrost-metrics-token
+    secretKey: token
+    interval: 30s
+  ray:
+    # Every head and worker Bifrost provisions exposes Prometheus metrics on
+    # :8080. Bifrost's own tenant policy admits nothing else to those pods, so
+    # this also renders a NetworkPolicy in the Ray namespace that opens exactly
+    # that port to exactly the scraper's namespace. The bifrost.dev/cluster-id
+    # and bifrost.dev/owner pod labels become series labels (bifrost_cluster,
+    # bifrost_owner), which is what lets the dashboard slice by tenant.
+    interval: 15s
+    networkPolicy: true
+  gateway:
+    # The platform gateway's view of Bifrost: request rate, status classes and
+    # latency per HTTPRoute. Envoy exposes thousands of series per pod; only
+    # request-level series for the routes matching routeNamespaces are kept.
+    enabled: false
+    namespace: envoy-gateway-system
+    podSelector:
+      gateway.envoyproxy.io/owning-gateway-name: nebari-gateway
+    metricsPort: metrics
+    routeNamespaces: [bifrost, jupyter, checkmaite]
+  dashboard:
+    # The "Bifrost platform" Grafana dashboard (chart/dashboards/), shipped as
+    # a ConfigMap the Grafana dashboards sidecar picks up from any namespace.
+    # Source of truth is bifrost/deploy/grafana; scripts/sync-dashboard.sh
+    # copies it here.
+    enabled: true
+    namespace: ""            # default: observability.namespace
+    datasourceUid: mimir     # the Prometheus-compatible datasource in Grafana
+    label: grafana_dashboard
+    labelValue: "1"

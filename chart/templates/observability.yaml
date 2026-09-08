@@ -1,0 +1,136 @@
+{{- if .Values.observability.enabled }}
+{{- $o := .Values.observability }}
+{{- $rayNs := include "bifrost-pack.rayNamespace" . }}
+# Scraping Bifrost. The endpoint is Read on the cluster target, so the token
+# in $o.api.secretName is the scraper's identity — a local viewer user's PAT.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "bifrost-pack.fullname" . }}
+  namespace: {{ $o.namespace }}
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+    release: {{ $o.prometheusReleaseLabel }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace | quote }}]
+  selector:
+    matchLabels:
+      {{- include "bifrost-pack.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /api/v1/metrics
+      interval: {{ $o.api.interval }}
+      bearerTokenSecret:
+        name: {{ $o.api.secretName }}
+        key: {{ $o.api.secretKey }}
+---
+# Every Ray node Bifrost provisions. The pod labels Bifrost stamps become
+# series labels so a dashboard can slice by cluster and owner.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "bifrost-pack.fullname" . }}-ray-nodes
+  namespace: {{ $o.namespace }}
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+    release: {{ $o.prometheusReleaseLabel }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ $rayNs | quote }}]
+  selector:
+    matchLabels:
+      ray.io/is-ray-node: "yes"
+  podMetricsEndpoints:
+    - port: metrics
+      interval: {{ $o.ray.interval }}
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_bifrost_dev_cluster_id]
+          targetLabel: bifrost_cluster
+        - sourceLabels: [__meta_kubernetes_pod_label_bifrost_dev_owner]
+          targetLabel: bifrost_owner
+        - sourceLabels: [__meta_kubernetes_pod_label_ray_io_node_type]
+          targetLabel: ray_node_type
+{{- if $o.ray.networkPolicy }}
+---
+# Bifrost's per-cluster policy admits a cluster's own pods and the owner's
+# notebook to a Ray head, and nothing else — which is right, and which is why
+# a scraper times out without this. Policies are additive: one port, one
+# namespace, Bifrost's posture untouched. Lives in the Ray namespace because
+# that is where the pods are.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "bifrost-pack.fullname" . }}-metrics-scrape
+  namespace: {{ $rayNs }}
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      ray.io/is-ray-node: "yes"
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $o.namespace }}
+      ports:
+        - port: 8080
+          protocol: TCP
+{{- end }}
+{{- if $o.gateway.enabled }}
+---
+# The gateway's view: request rate, status classes and latency per HTTPRoute.
+# httproute/<ns>/<route>/rule/<n> -> route_ns=<ns>, route=<route>.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "bifrost-pack.fullname" . }}-gateway-routes
+  namespace: {{ $o.namespace }}
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+    release: {{ $o.prometheusReleaseLabel }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ $o.gateway.namespace | quote }}]
+  selector:
+    matchLabels:
+      {{- toYaml $o.gateway.podSelector | nindent 6 }}
+  podMetricsEndpoints:
+    - port: {{ $o.gateway.metricsPort }}
+      path: /stats/prometheus
+      interval: 15s
+      metricRelabelings:
+        - sourceLabels: [__name__]
+          regex: envoy_cluster_upstream_rq_total|envoy_cluster_upstream_rq_xx|envoy_cluster_upstream_rq_time_bucket|envoy_cluster_upstream_rq_time_count|envoy_cluster_upstream_rq_time_sum|envoy_cluster_upstream_rq_active|envoy_cluster_upstream_rq_timeout|envoy_cluster_upstream_cx_active
+          action: keep
+        - sourceLabels: [envoy_cluster_name]
+          regex: httproute/({{ join "|" $o.gateway.routeNamespaces }})/.*
+          action: keep
+        - sourceLabels: [envoy_cluster_name]
+          regex: httproute/([^/]+)/([^/]+)/.*
+          targetLabel: route_ns
+          replacement: $1
+        - sourceLabels: [envoy_cluster_name]
+          regex: httproute/([^/]+)/([^/]+)/.*
+          targetLabel: route
+          replacement: $2
+{{- end }}
+{{- if $o.dashboard.enabled }}
+---
+# The dashboard, for the Grafana dashboards sidecar. The datasource uid is
+# rewritten to whatever this deployment's Prometheus-compatible datasource is.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "bifrost-pack.fullname" . }}-grafana-dashboard
+  namespace: {{ $o.dashboard.namespace | default $o.namespace }}
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+    {{ $o.dashboard.label }}: {{ $o.dashboard.labelValue | quote }}
+data:
+  bifrost-platform.json: |-
+    {{- .Files.Get "dashboards/bifrost-platform.json" | replace "\"uid\": \"mimir\"" (printf "\"uid\": %q" $o.dashboard.datasourceUid) | nindent 4 }}
+{{- end }}
+{{- end }}
