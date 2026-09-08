@@ -128,6 +128,15 @@ rules:
     resources: ["namespaces"]
     resourceNames: [{{ $rayNs | quote }}]
     verbs: ["get", "patch"]
+  # With --ray-autoscaling (ray.autoscaling) each autoscaled cluster gets an
+  # egress policy naming the API server's real endpoint addresses — read from
+  # endpoints/kubernetes in default. Without this the autoscaler sidecar
+  # cannot leave the tenant posture and dies on a connect timeout (bifrost
+  # defect 2026-09-08). Harmless when autoscaling is off: never read.
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    resourceNames: ["kubernetes"]
+    verbs: ["get"]
   {{- if .Values.rbac.kueue }}
 
   # Kueue pool objects. Cohort, ResourceFlavor and ClusterQueue are
