@@ -130,11 +130,11 @@ rules:
     verbs: ["get", "patch"]
   # With --ray-autoscaling (ray.autoscaling) each autoscaled cluster gets an
   # egress policy naming the API server's real endpoint addresses — read from
-  # endpoints/kubernetes in default. Without this the autoscaler sidecar
-  # cannot leave the tenant posture and dies on a connect timeout (bifrost
-  # defect 2026-09-08). Harmless when autoscaling is off: never read.
-  - apiGroups: [""]
-    resources: ["endpoints"]
+  # the kubernetes EndpointSlice in default. Without this the autoscaler
+  # sidecar cannot leave the tenant posture and dies on a connect timeout
+  # (bifrost defect 2026-09-08). Harmless when autoscaling is off: never read.
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
     resourceNames: ["kubernetes"]
     verbs: ["get"]
   {{- if .Values.rbac.kueue }}
