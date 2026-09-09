@@ -1,0 +1,6 @@
+# Values the Lint workflow layers onto every `helm template` run. The chart
+# refuses to render without image.tag on purpose (bifrost publishes
+# `sha-<short>` and `latest`; AppVersion is not a tag), so CI has to supply
+# one — this is the only value here, and it is not a deployment default.
+image:
+  tag: sha-lint
