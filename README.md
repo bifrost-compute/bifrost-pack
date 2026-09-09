@@ -175,7 +175,8 @@ reasoning. The ones you will actually set:
 | --- | --- | --- |
 | `image.repository` / `image.tag` | `ghcr.io/brandonrc/bifrost` / chart appVersion | **Not published yet** — build from the bifrost repo's Dockerfile |
 | `auth.mode` | `oidc` | `oidc` \| `local` \| `none` |
-| `auth.oidc.issuer` | placeholder | Your Keycloak realm; discovery must resolve at boot or the pod fails fast |
+| `auth.oidc.issuer` | placeholder | Your Keycloak realm — the exact `iss` tokens carry; discovery must resolve at boot or the pod fails fast |
+| `auth.oidc.discoveryURL` | `` | Fetch discovery/JWKS here instead of at the issuer (Keycloak behind a fixed frontend hostname, reached in-cluster through its Service). Needs a bifrost build with `discovery_url` support |
 | `auth.oidc.roles` | all empty | Group → role mappings; deny-by-default |
 | `store.kind` | `sqlite` | `memory` \| `sqlite` \| `postgres`; `postgres` is the only one that supports `replicaCount > 1` |
 | `ray.namespace` | release namespace | Where RayClusters land. Not `ray` |
