@@ -235,6 +235,27 @@ ray:
   # `--reconcile-interval` (Go duration). "" uses Bifrost's own default.
   reconcileInterval: ""
 
+  # Placement every tenant Ray pod carries — heads, workers, Serve pods and
+  # RayJob submitters alike (`--ray-node-selector` / `--ray-tolerations`).
+  # Deployment-wide, not per cluster: it says where THIS control plane may
+  # put tenant pods on THIS cluster. The typical Nebari case is a dedicated
+  # user node group that JupyterHub taints `hub.jupyter.org/dedicated=user`
+  # (NoSchedule) — without the toleration below no tenant cluster can
+  # schedule there and everything lands on the core nodes.
+  #
+  #   nodeSelector:
+  #     hub.jupyter.org/node-purpose: user
+  #   tolerations:
+  #     - key: hub.jupyter.org/dedicated
+  #       operator: Equal
+  #       value: user
+  #       effect: NoSchedule
+  #
+  # Changing these re-applies every managed pod template and KubeRay rolls
+  # the pods; the owned-spec fingerprint ignores them, so nothing drifts.
+  nodeSelector: {}
+  tolerations: []
+
 # --- kuberay-operator subchart ----------------------------------------------
 # OFF BY DEFAULT, and that default is load-bearing:
 #

@@ -141,6 +141,16 @@ spec:
             {{- with .Values.ray.reconcileInterval }}
             - --reconcile-interval={{ . }}
             {{- end }}
+            {{- with .Values.ray.nodeSelector }}
+            {{- $pairs := list }}
+            {{- range $k, $v := . }}{{ $pairs = append $pairs (printf "%s=%s" $k $v) }}{{ end }}
+            - --ray-node-selector={{ join "," $pairs }}
+            {{- end }}
+            {{- with .Values.ray.tolerations }}
+            # JSON so the flag survives argv untouched; quoted so YAML never
+            # sees the braces as a flow mapping.
+            - {{ printf "--ray-tolerations=%s" (toJson .) | quote }}
+            {{- end }}
             {{- end }}
           {{- if and (include "bifrost-pack.localAuthEnabled" .) .Values.auth.local.existingSecret }}
           env:

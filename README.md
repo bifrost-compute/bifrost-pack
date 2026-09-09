@@ -179,6 +179,7 @@ reasoning. The ones you will actually set:
 | `auth.oidc.roles` | all empty | Group → role mappings; deny-by-default |
 | `store.kind` | `sqlite` | `memory` \| `sqlite` \| `postgres`; `postgres` is the only one that supports `replicaCount > 1` |
 | `ray.namespace` | release namespace | Where RayClusters land. Not `ray` |
+| `ray.nodeSelector` / `ray.tolerations` | `{}` / `[]` | Placement stamped on every tenant Ray pod (heads, workers, Serve, job submitters). Set the toleration for a `hub.jupyter.org/dedicated=user` node group or tenant clusters cannot schedule there |
 | `nebariApp.api.hostname` | — | Required when `nebariApp.api.enabled` |
 | `ui.enabled` | `false` | Dashboard; SSO config is served at runtime (`ui.sso.*`) |
 | `gateway.domain` | `` (off) | Requirement 5 and the Serve half of 1/2: turns on dynamic gateway registration; provisioned clusters, running jobs and Serve endpoints answer as `<name>.<domain>` (Host-header matched). Empty leaves only the static `clusters` registry |
