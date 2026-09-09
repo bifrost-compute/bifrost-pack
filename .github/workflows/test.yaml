@@ -151,10 +151,21 @@ jobs:
           # assert an actual response rather than the manifest.
           # The Service name comes from fullnameOverride (`bifrost`), not the
           # release name, so it is `bifrost-ui` regardless of $RELEASE.
-          kubectl run ui-probe --rm -i --restart=Never -n "$NS" \
+          # Not `kubectl run -i --rm`: attaching to a container that exits in
+          # milliseconds races the attach and yields empty output (observed as
+          # a false failure). Run detached, wait for the pod to finish, read
+          # its logs, then clean up.
+          kubectl delete pod ui-probe -n "$NS" --ignore-not-found >/dev/null
+          kubectl run ui-probe --restart=Never -n "$NS" \
             --image=curlimages/curl:latest --command -- \
-            curl -sS -o /dev/null -w '%{http_code}' "http://bifrost-ui/" \
-            | tee /tmp/ui_code
+            curl -sS -o /dev/null -w '%{http_code}' "http://bifrost-ui/"
+          for i in $(seq 1 30); do
+            phase=$(kubectl get pod ui-probe -n "$NS" -o jsonpath='{.status.phase}' 2>/dev/null)
+            case "$phase" in Succeeded|Failed) break ;; esac
+            sleep 2
+          done
+          kubectl logs ui-probe -n "$NS" | tee /tmp/ui_code; echo
+          kubectl delete pod ui-probe -n "$NS" --ignore-not-found >/dev/null
           grep -q '^200' /tmp/ui_code
 
       - name: Dashboard debug on failure
