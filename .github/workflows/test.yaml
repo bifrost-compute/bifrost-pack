@@ -91,15 +91,28 @@ jobs:
 
       # --wait is deliberately absent: see the header. --atomic is too, since
       # it implies --wait.
+      # Kueue's Deployment can report Available while its webhook server is
+      # still a second or two from listening; the first install then dies on
+      # `failed calling webhook "mdeployment.kb.io"`. Same race bifrost's own
+      # l3-kind workflow retries around. Retry the install, cleaning up a
+      # half-applied release between attempts.
       - name: Install chart
         run: |
-          helm install "$RELEASE" chart \
-            --namespace "$NS" \
-            --set image.tag=latest \
-            --set auth.mode=local \
-            --set ray.namespace="$RAY_NS" \
-            --set persistence.enabled=false \
-            --set networkPolicy.enabled=true
+          for attempt in $(seq 1 10); do
+            if helm install "$RELEASE" chart \
+                --namespace "$NS" \
+                --set image.tag=latest \
+                --set auth.mode=local \
+                --set ray.namespace="$RAY_NS" \
+                --set persistence.enabled=false \
+                --set networkPolicy.enabled=true; then
+              exit 0
+            fi
+            echo "helm install failed (attempt $attempt), retrying in 6s"
+            helm uninstall "$RELEASE" --namespace "$NS" --ignore-not-found >/dev/null 2>&1 || true
+            sleep 6
+          done
+          echo "helm install never succeeded"; exit 1
 
       - name: Objects were created
         run: |
