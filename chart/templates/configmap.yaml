@@ -31,6 +31,9 @@ data:
             "viewer"    ($roles.viewer    | default list)
             "auditor"   ($roles.auditor   | default list))
     }}
+    {{- with .Values.auth.oidc.discoveryURL }}
+    {{- $_ := set $cfg "discovery_url" . }}
+    {{- end }}
     {{- with .Values.auth.oidc.projectRoles }}
     {{- $pr := dict
           "admin"     (.admin     | default list)

@@ -118,6 +118,16 @@ auth:
     # cannot. REPLACE this placeholder with your Nebari Keycloak realm, e.g.
     # https://nebari.example.com/auth/realms/nebari
     issuer: https://keycloak.example.com/realms/nebari
+    # Where to FETCH discovery (and, through it, the JWKS) when that is not
+    # the issuer. Keycloak stamps its fixed frontend hostname as `iss` even
+    # for callers that reach it through its Service, and on a private
+    # cluster that hostname may have no in-cluster DNS and a certificate the
+    # pod does not trust. Set this to the in-cluster URL of the realm; keep
+    # `issuer` as the value tokens carry. The advertised issuer is still
+    # cross-checked against `issuer`. http here needs allowInsecureTransport.
+    # "" = discover at the issuer.
+    #   discoveryURL: http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/realms/nebari
+    discoveryURL: ""
 
     # Required `aud` claim on presented JWTs.
     #
