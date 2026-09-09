@@ -228,9 +228,13 @@ jobs:
           deny list namespaces
           deny create namespaces
           deny patch "namespace/kube-system"
-          # No Secret or pod-exec access anywhere.
-          deny get secrets "$RAY_NS"
+          # Secrets: `get` by name only — the storage catalogue's existence
+          # check (ensureStorageSourcesExist reads PartialObjectMetadata; the
+          # metadata-only property is a code guarantee, RBAC has no such
+          # verb). Never list, never write, and no pod exec anywhere.
+          allow get secrets "$RAY_NS"
           deny list secrets "$RAY_NS"
+          deny create secrets "$RAY_NS"
           deny create pods "$RAY_NS" exec
           # Nothing outside the Ray namespace, and no RBAC self-inspection.
           deny list rayclusters.ray.io kube-system
