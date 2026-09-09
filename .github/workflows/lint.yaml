@@ -32,11 +32,11 @@ jobs:
         run: helm lint chart
 
       - name: Template (defaults)
-        run: helm template test chart
+        run: helm template test chart -f ci/lint-values.yaml
 
       - name: Template (Nebari - both NebariApps, Postgres HA, split Ray namespace)
         run: |
-          helm template test chart -n bifrost \
+          helm template test chart -f ci/lint-values.yaml -n bifrost \
             --set replicaCount=2 \
             --set store.kind=postgres \
             --set store.postgres.dsn=postgres://bifrost:pw@postgres.data.svc:5432/bifrost \
@@ -49,7 +49,7 @@ jobs:
 
       - name: Template (standalone - local auth, no lifecycle)
         run: |
-          helm template test chart \
+          helm template test chart -f ci/lint-values.yaml \
             --set auth.mode=local \
             --set store.kind=memory \
             --set ray.enabled=false
@@ -60,7 +60,7 @@ jobs:
       # A values change that flipped this default would be a silent outage.
       - name: Assert API NebariApp keeps gateway enforcement off
         run: |
-          helm template test chart -n bifrost \
+          helm template test chart -f ci/lint-values.yaml -n bifrost \
             --set nebariApp.api.enabled=true \
             --set nebariApp.api.hostname=bifrost.example.com \
             | grep -q "enforceAtGateway: false" \
@@ -71,7 +71,7 @@ jobs:
       # in the render looks wrong.
       - name: Assert NebariApp routing is present
         run: |
-          helm template test chart -n bifrost \
+          helm template test chart -f ci/lint-values.yaml -n bifrost \
             --set nebariApp.api.enabled=true \
             --set nebariApp.api.hostname=bifrost.example.com \
             | grep -q "pathPrefix: /" \
@@ -81,7 +81,7 @@ jobs:
       # (Bifrost's own tenant-allow policy, internal/provision/kuberay.go).
       - name: Assert control-plane pod label is stamped
         run: |
-          helm template test chart \
+          helm template test chart -f ci/lint-values.yaml \
             | grep -q 'bifrost.dev/control-plane: "true"' \
             || { echo "control-plane pod label missing from the Deployment"; exit 1; }
 
@@ -89,7 +89,7 @@ jobs:
       # clusters.
       - name: Assert the `ray` namespace is refused
         run: |
-          if helm template test chart --set ray.namespace=ray >/dev/null 2>&1; then
+          if helm template test chart -f ci/lint-values.yaml --set ray.namespace=ray >/dev/null 2>&1; then
             echo "ray.namespace=ray should have been refused"; exit 1
           fi
 
@@ -97,7 +97,7 @@ jobs:
         run: |
           # -ignore-missing-schemas: NebariApp (reconcilers.nebari.dev) has no
           # upstream JSON schema.
-          helm template test chart -n bifrost \
+          helm template test chart -f ci/lint-values.yaml -n bifrost \
             --set ui.enabled=true \
             --set nebariApp.api.enabled=true \
             --set nebariApp.api.hostname=bifrost.example.com \
