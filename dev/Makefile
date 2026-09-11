@@ -12,7 +12,7 @@
 #   make update-hosts   Update /etc/hosts with NebariApp hostnames
 #   make down           Delete the kind cluster
 #
-# The chart's image default (ghcr.io/brandonrc/bifrost) is NOT published yet.
+# The chart's image default (ghcr.io/bifrost-compute/bifrost) is NOT published yet.
 # Point IMAGE_REPO/IMAGE_TAG at an image you built from the bifrost repo's
 # Dockerfile, or `kind load docker-image` it into the cluster first:
 #   make up IMAGE_REPO=bifrost IMAGE_TAG=dev
@@ -27,7 +27,7 @@ NAMESPACE      := bifrost
 RAY_NAMESPACE  := bifrost-clusters
 HOSTNAME       := bifrost.nebari.local
 UI_HOSTNAME    := bifrost-dashboard.nebari.local
-IMAGE_REPO     := ghcr.io/brandonrc/bifrost
+IMAGE_REPO     := ghcr.io/bifrost-compute/bifrost
 IMAGE_TAG      := latest
 KUBERAY_VERSION := 1.4.0
 CACHE_DIR      := .cache

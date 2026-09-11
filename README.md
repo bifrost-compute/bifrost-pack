@@ -1,7 +1,7 @@
 # bifrost-pack
 
 A [Nebari](https://www.nebari.dev/) software pack for
-[Bifrost](https://github.com/brandonrc/bifrost) — the Go control plane for Ray
+[Bifrost](https://github.com/bifrost-compute/bifrost) — the Go control plane for Ray
 and Dask clusters.
 
 Bifrost is the guarded bridge to a compute cluster: a REST API on `:8484` that
@@ -15,8 +15,8 @@ This repo is the pack: one Helm chart under [`chart/`](chart/) plus the
 It is the successor to `mobula-pack`, the pack for Bifrost's Rust predecessor.
 
 > **Status: experimental.** Both of the blockers this section used to list are
-> now cleared. The [bifrost repo](https://github.com/brandonrc/bifrost)
-> publishes `ghcr.io/brandonrc/bifrost` on every push to `main`, tagged
+> now cleared. The [bifrost repo](https://github.com/bifrost-compute/bifrost)
+> publishes `ghcr.io/bifrost-compute/bifrost` on every push to `main`, tagged
 > `sha-<short>` (immutable, preferred) and `latest` — `image.tag` is required,
 > because `.Chart.AppVersion` is *not* a published tag. The dashboard's OIDC
 > client id is configurable via `VITE_BIFROST_SSO_CLIENT_ID`, so it can match
@@ -173,7 +173,7 @@ reasoning. The ones you will actually set:
 
 | Value | Default | Notes |
 | --- | --- | --- |
-| `image.repository` / `image.tag` | `ghcr.io/brandonrc/bifrost` / chart appVersion | **Not published yet** — build from the bifrost repo's Dockerfile |
+| `image.repository` / `image.tag` | `ghcr.io/bifrost-compute/bifrost` / chart appVersion | **Not published yet** — build from the bifrost repo's Dockerfile |
 | `auth.mode` | `oidc` | `oidc` \| `local` \| `none` |
 | `auth.oidc.issuer` | placeholder | Your Keycloak realm; discovery must resolve at boot or the pod fails fast |
 | `auth.oidc.roles` | all empty | Group → role mappings; deny-by-default |

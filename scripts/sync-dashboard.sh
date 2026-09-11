@@ -9,7 +9,7 @@ src="${BIFROST_REPO:-$here/../bifrost}/deploy/grafana/bifrost-platform.json"
 if [[ -f "$src" ]]; then
   cp "$src" "$dst"
 else
-  curl -fsSL "https://raw.githubusercontent.com/brandonrc/bifrost/${BIFROST_REF:-main}/deploy/grafana/bifrost-platform.json" -o "$dst"
+  curl -fsSL "https://raw.githubusercontent.com/bifrost-compute/bifrost/${BIFROST_REF:-main}/deploy/grafana/bifrost-platform.json" -o "$dst"
 fi
 python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$dst"
 echo "synced $(wc -c < "$dst") bytes -> $dst"

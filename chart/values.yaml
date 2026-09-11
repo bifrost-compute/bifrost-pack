@@ -26,7 +26,7 @@ image:
   # ENTRYPOINT /usr/local/bin/bifrost. That workflow tags `sha-<short>` and
   # `latest`, and smoke-tests the pushed artifact (runs --version, asserts
   # non-root and statically linked) before the job goes green.
-  repository: ghcr.io/brandonrc/bifrost
+  repository: ghcr.io/bifrost-compute/bifrost
 
   # REQUIRED — there is deliberately no default, and templating fails with a
   # message if you omit it.
@@ -417,7 +417,7 @@ ui:
     clientId: ""
     issuer: ""
   image:
-    repository: ghcr.io/brandonrc/bifrost-ui
+    repository: ghcr.io/bifrost-compute/bifrost-ui
     tag: latest
     # `latest` is mutable: IfNotPresent would serve a node's stale cached
     # layer after a re-push to the same tag. Pin a digest and set this back to
@@ -524,7 +524,7 @@ nebariApp:
       enabled: true
       displayName: Bifrost
       description: Control plane for Ray and Dask clusters — SSO, RBAC, quotas, and a federating job gateway
-      icon: https://raw.githubusercontent.com/brandonrc/bifrost-pack/main/assets/bifrost-icon.png
+      icon: https://raw.githubusercontent.com/bifrost-compute/bifrost-pack/main/assets/bifrost-icon.png
       category: Compute
       priority: 20
       healthCheck:

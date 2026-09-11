@@ -7,13 +7,13 @@ description: >-
   owns, manages Kueue resource pools, and federates the Ray Jobs API behind a
   single authenticated gateway.
 type: application
-icon: https://raw.githubusercontent.com/brandonrc/bifrost-pack/main/assets/bifrost-icon.png
+icon: https://raw.githubusercontent.com/bifrost-compute/bifrost-pack/main/assets/bifrost-icon.png
 
-home: https://github.com/brandonrc/bifrost-pack
+home: https://github.com/bifrost-compute/bifrost-pack
 sources:
-  - https://github.com/brandonrc/bifrost
-  - https://github.com/brandonrc/bifrost-ui
-  - https://github.com/brandonrc/bifrost-pack
+  - https://github.com/bifrost-compute/bifrost
+  - https://github.com/bifrost-compute/bifrost-ui
+  - https://github.com/bifrost-compute/bifrost-pack
 
 keywords:
   - nebari
