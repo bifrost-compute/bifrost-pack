@@ -11,9 +11,9 @@
 #     namespace-wide default-deny silently disables Bifrost's tenant
 #     isolation rather than layering with it.
 #   * Bifrost's tenant-allow admits the control plane to Ray heads only via
-#     pods labelled bifrost.dev/control-plane=true. The Deployment carries
+#     pods labelled bifrost-compute.dev/control-plane=true. The Deployment carries
 #     that label; if the control plane runs in a DIFFERENT namespace from the
-#     Ray pods, that namespace must also carry bifrost.dev/control-plane=true.
+#     Ray pods, that namespace must also carry bifrost-compute.dev/control-plane=true.
 #
 # Egress is unrestricted here on purpose: the control plane talks to the
 # Kubernetes API server, the OIDC issuer, Postgres, and every registered Ray

@@ -44,7 +44,7 @@ helm dependency update chart
 
 kubectl create namespace bifrost
 kubectl label namespace bifrost nebari.dev/managed=true --overwrite
-kubectl label namespace bifrost bifrost.dev/control-plane=true --overwrite
+kubectl label namespace bifrost bifrost-compute.dev/control-plane=true --overwrite
 
 helm install bifrost ./chart -n bifrost \
   --set image.repository=<your-registry>/bifrost \
@@ -200,7 +200,7 @@ that reads the result:
   the scraper needs an identity: a local `viewer` user's PAT in the Secret named
   by `observability.api.secretName`, in the monitors' namespace;
 - a `PodMonitor` for every Ray head and worker (`ray.io/is-ray-node=yes`, port
-  `metrics`), relabelling `bifrost.dev/cluster-id` and `bifrost.dev/owner` onto
+  `metrics`), relabelling `bifrost-compute.dev/cluster-id` and `bifrost-compute.dev/owner` onto
   every series so the dashboard slices by tenant;
 - the one `NetworkPolicy` Bifrost's tenant posture does not grant — the
   scraper's namespace to `:8080` on Ray pods (without it, every Ray target times

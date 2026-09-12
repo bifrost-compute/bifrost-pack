@@ -562,8 +562,8 @@ observability:
     # Every head and worker Bifrost provisions exposes Prometheus metrics on
     # :8080. Bifrost's own tenant policy admits nothing else to those pods, so
     # this also renders a NetworkPolicy in the Ray namespace that opens exactly
-    # that port to exactly the scraper's namespace. The bifrost.dev/cluster-id
-    # and bifrost.dev/owner pod labels become series labels (bifrost_cluster,
+    # that port to exactly the scraper's namespace. The bifrost-compute.dev/cluster-id
+    # and bifrost-compute.dev/owner pod labels become series labels (bifrost_cluster,
     # bifrost_owner), which is what lets the dashboard slice by tenant.
     interval: 15s
     networkPolicy: true

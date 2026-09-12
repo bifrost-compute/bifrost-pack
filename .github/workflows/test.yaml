@@ -87,7 +87,7 @@ jobs:
         run: |
           kubectl create namespace "$NS"
           kubectl create namespace "$RAY_NS"
-          kubectl label namespace "$NS" bifrost.dev/control-plane=true --overwrite
+          kubectl label namespace "$NS" bifrost-compute.dev/control-plane=true --overwrite
 
       # --wait is deliberately absent: see the header. --atomic is too, since
       # it implies --wait.
