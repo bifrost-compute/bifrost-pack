@@ -12,7 +12,7 @@ description: >-
   Control plane for Ray and Dask clusters — OIDC bearer auth, deny-by-default
   RBAC, self-serve clusters, Kueue pools, and a federating Ray Jobs gateway.
 level: experimental
-owner: brandonrc
+owner: bifrost-compute
 deprecated: false
 
 # May be null below ga.
@@ -41,4 +41,4 @@ demo_notes: |
   login mints a `bfr_` PAT, create returns 201, the RayCluster provisions.
 
 links:
-  docs: https://github.com/brandonrc/bifrost-pack/blob/main/README.md
+  docs: https://github.com/bifrost-compute/bifrost-pack/blob/main/README.md

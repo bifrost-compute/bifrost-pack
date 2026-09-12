@@ -19,7 +19,7 @@ name: Test
 # image exists for the Bifrost server.
 #
 # The DASHBOARD is different and is covered below: its image IS published
-# (ghcr.io/brandonrc/bifrost-ui), and it is the one component whose failure
+# (ghcr.io/bifrost-compute/bifrost-ui), and it is the one component whose failure
 # mode a manifest test cannot see — it CrashLoopBackOff'd on a real cluster
 # because stock nginx needs CAP_CHOWN that the chart drops, with every port
 # and label correct. So the dashboard steps deliberately do run the container
