@@ -141,7 +141,7 @@ rules:
 
   # Kueue pool objects. Cohort, ResourceFlavor and ClusterQueue are
   # cluster-scoped; LocalQueue is namespaced but Bifrost lists it ACROSS all
-  # namespaces by the bifrost.dev/pool label (DeletePool/ObservePool), so it
+  # namespaces by the bifrost-compute.dev/pool label (DeletePool/ObservePool), so it
   # has to be granted cluster-wide too.
   #   create+patch - ApplyPool's SSA of each object
   #   list         - DeletePool's label-selected teardown sweep, and

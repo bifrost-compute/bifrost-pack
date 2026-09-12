@@ -36,7 +36,7 @@ spec:
         # TenantAllowNetworkPolicy). Drop it and the reconciler still works
         # (it talks to the API server) but every dashboard/jobs/nodes proxy
         # call to a Ray head is blackholed by Bifrost's own policy.
-        bifrost.dev/control-plane: "true"
+        bifrost-compute.dev/control-plane: "true"
       annotations:
         # Roll the pod when the rendered config changes.
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}

@@ -147,7 +147,7 @@ _kuberay:
 # Three labels, each load-bearing:
 #   nebari.dev/managed          - without it the operator ignores every
 #                                 NebariApp in the namespace, silently
-#   bifrost.dev/control-plane   - Bifrost's own tenant-allow NetworkPolicy
+#   bifrost-compute.dev/control-plane   - Bifrost's own tenant-allow NetworkPolicy
 #                                 admits control-plane pods to Ray heads only
 #                                 from a namespace carrying this
 #   (ray namespace)             - must exist before Bifrost applies its PSS
@@ -156,7 +156,7 @@ _namespaces:
 	kubectl create namespace $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
 	kubectl create namespace $(RAY_NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
 	kubectl label namespace $(NAMESPACE) nebari.dev/managed=true --overwrite
-	kubectl label namespace $(NAMESPACE) bifrost.dev/control-plane=true --overwrite
+	kubectl label namespace $(NAMESPACE) bifrost-compute.dev/control-plane=true --overwrite
 
 # --------------------------------------------------------------------------
 # up - deploy Bifrost with a NebariApp
@@ -220,7 +220,7 @@ up-standalone:
 	fi
 	kubectl create namespace $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
 	kubectl create namespace $(RAY_NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
-	kubectl label namespace $(NAMESPACE) bifrost.dev/control-plane=true --overwrite
+	kubectl label namespace $(NAMESPACE) bifrost-compute.dev/control-plane=true --overwrite
 	helm dependency update $(CHART_DIR)
 	helm upgrade --install $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) \

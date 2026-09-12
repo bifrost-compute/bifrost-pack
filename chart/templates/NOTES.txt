@@ -113,11 +113,11 @@ Bifrost {{ .Chart.AppVersion }} deployed as release {{ .Release.Name }} in names
 
   The control plane runs in {{ .Release.Namespace }} but provisions into {{ include "bifrost-pack.rayNamespace" . }}. Bifrost's
   own tenant-allow policy admits control-plane traffic to Ray heads only from
-  pods labelled bifrost.dev/control-plane=true in a namespace labelled the
+  pods labelled bifrost-compute.dev/control-plane=true in a namespace labelled the
   same way. Label the control-plane namespace or the dashboard/jobs/nodes
   proxies will time out:
 
-    kubectl label namespace {{ .Release.Namespace }} bifrost.dev/control-plane=true --overwrite
+    kubectl label namespace {{ .Release.Namespace }} bifrost-compute.dev/control-plane=true --overwrite
 {{- end }}
 
 {{- if not (index .Values "kuberay-operator" "enabled") }}

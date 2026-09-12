@@ -82,7 +82,7 @@ jobs:
       - name: Assert control-plane pod label is stamped
         run: |
           helm template test chart -f ci/lint-values.yaml \
-            | grep -q 'bifrost.dev/control-plane: "true"' \
+            | grep -q 'bifrost-compute.dev/control-plane: "true"' \
             || { echo "control-plane pod label missing from the Deployment"; exit 1; }
 
       # rayserve-pack's `shared` release owns the `ray` namespace on Nebari
