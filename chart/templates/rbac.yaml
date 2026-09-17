@@ -56,6 +56,27 @@ rules:
     resources: ["secrets"]
     verbs: ["get"]
 
+  # PersistentVolumeClaims (requirement 12, volume-source storage entries):
+  # the same metadata-only existence check as Secrets, for entries whose
+  # `source` is `persistent_volume_claim`. A claim carries no credential,
+  # so the RBAC caveat above does not apply. `get` only, by name.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get"]
+
+  # ServiceAccounts (requirement 20, workload identity): administrators name
+  # the ServiceAccount a project's clusters, jobs and services run under in
+  # the policy's `workload_identity` section; before applying a workload the
+  # live client GETs it as a metav1.PartialObjectMetadata so a rule naming
+  # an account the platform never created fails the apply with an error
+  # naming it, instead of pods the kubelet refuses to start. Bifrost only
+  # NAMES the account on pod templates: the platform creates it and binds the
+  # cloud role (EKS Pod Identity / IRSA, GKE Workload Identity). No
+  # create/patch/delete, no `list`, and nothing on serviceaccounts/token.
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get"]
+
   # NetworkPolicy: Bifrost owns the tenant network posture in this namespace —
   # a default-deny plus a tenant-allow scoped to pods it provisioned, and one
   # per-cluster intra-tenant allow per RayCluster/RayService.
