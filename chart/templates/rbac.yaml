@@ -18,11 +18,21 @@
 #   * There are no `watch` verbs anywhere: the reconciler polls on its resync
 #     interval (controller-runtime is used as an uncached library — no
 #     Manager, no informers), so nothing here ever opens a watch.
+#
+# tenancy.enabled (bifrost requirement 21) renders these same rules as a
+# ClusterRole: a mapped project's objects live in a namespace only the policy
+# knows, so the control plane applies into and lists across namespaces.
 apiVersion: rbac.authorization.k8s.io/v1
+{{- if .Values.tenancy.enabled }}
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-{{ include "bifrost-pack.fullname" . }}-ray
+{{- else }}
 kind: Role
 metadata:
   name: {{ include "bifrost-pack.fullname" . }}-ray
   namespace: {{ $rayNs }}
+{{- end }}
   labels:
     {{- include "bifrost-pack.labels" . | nindent 4 }}
 rules:
@@ -115,6 +125,17 @@ rules:
     verbs: ["list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+{{- if .Values.tenancy.enabled }}
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-{{ include "bifrost-pack.fullname" . }}-ray
+  labels:
+    {{- include "bifrost-pack.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-{{ include "bifrost-pack.fullname" . }}-ray
+{{- else }}
 kind: RoleBinding
 metadata:
   name: {{ include "bifrost-pack.fullname" . }}-ray
@@ -125,6 +146,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ include "bifrost-pack.fullname" . }}-ray
+{{- end }}
 subjects:
   - kind: ServiceAccount
     name: {{ include "bifrost-pack.serviceAccountName" . }}
@@ -145,9 +167,14 @@ rules:
   # to exactly that one namespace — get and patch both honour resourceNames.
   # No `create`: the namespace must already exist; Bifrost reports it as a
   # backend error if it does not.
+  # With tenancy.enabled the PSS labels go onto every mapped tenant namespace
+  # and the control-plane label onto this release's namespace, so the
+  # narrowing is dropped there (the set of namespaces is a runtime policy).
   - apiGroups: [""]
     resources: ["namespaces"]
+    {{- if not .Values.tenancy.enabled }}
     resourceNames: [{{ $rayNs | quote }}]
+    {{- end }}
     verbs: ["get", "patch"]
   # With --ray-autoscaling (ray.autoscaling) each autoscaled cluster gets an
   # egress policy naming the API server's real endpoint addresses — read from

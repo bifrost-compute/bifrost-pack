@@ -135,6 +135,12 @@ spec:
             {{- end }}
             {{- if .Values.ray.enabled }}
             - --namespace={{ include "bifrost-pack.rayNamespace" . }}
+            {{- if .Values.tenancy.enabled }}
+            # Requirement 21: the policy's `namespaces` map places a project's
+            # workloads in its own namespace (needs the ClusterRole rbac.yaml
+            # renders under tenancy.enabled).
+            - --tenant-namespaces
+            {{- end }}
             {{- if .Values.ray.autoscaling }}
             - --ray-autoscaling
             {{- end }}
