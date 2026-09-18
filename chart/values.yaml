@@ -281,6 +281,33 @@ serviceAccount:
   name: ""
   annotations: {}
 
+# --- Image registries (bifrost requirement 10, image sources) --------------
+# How the control plane reaches container registries for inspect_image and
+# for browsing image sources: per registry host AS IMAGE REFERENCES NAME IT
+# (what the nodes pull from), the address the control plane's pod reaches its
+# /v2 API at, and the credentials to present. Nodes get their registry trust
+# and credentials from containerd; the control plane, in a pod, does not.
+#
+# The file is `serve --image-registries` (see bifrost
+# internal/registry.LoadHostsFile). It comes from a Secret you create out of
+# band so tokens never live in values:
+#
+#   kubectl -n bifrost create secret generic bifrost-image-registries \
+#     --from-file=registries.json=registries.json --from-file=ak-token=token.txt
+#
+#   registries.json:
+#   {"registries":[
+#     {"host":"localhost:32000","api":"http://registry.container-registry.svc:5000"},
+#     {"host":"artifact-keeper-backend.artifact-keeper.svc.cluster.local:8080",
+#      "api":"http://artifact-keeper-backend.artifact-keeper.svc.cluster.local:8080",
+#      "username":"bifrost","password_file":"/etc/bifrost/image-registries/ak-token"}
+#   ]}
+imageRegistries:
+  # Name of the Secret; empty renders nothing (every registry anonymous).
+  existingSecret: ""
+  # Key inside the Secret holding the JSON file.
+  key: registries.json
+
 # --- Tenant namespaces (bifrost requirement 21) ---------------------------
 # One Kubernetes namespace per project: the policy row's `namespaces` section
 # maps a project to the namespace the platform created for it, and Bifrost

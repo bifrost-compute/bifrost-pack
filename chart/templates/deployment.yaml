@@ -135,6 +135,9 @@ spec:
             {{- end }}
             {{- if .Values.ray.enabled }}
             - --namespace={{ include "bifrost-pack.rayNamespace" . }}
+            {{- if .Values.imageRegistries.existingSecret }}
+            - --image-registries=/etc/bifrost/image-registries/{{ .Values.imageRegistries.key }}
+            {{- end }}
             {{- if .Values.tenancy.enabled }}
             # Requirement 21: the policy's `namespaces` map places a project's
             # workloads in its own namespace (needs the ClusterRole rbac.yaml
@@ -199,6 +202,11 @@ spec:
             # is belt-and-braces for Go's os.TempDir and any future spill.
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.imageRegistries.existingSecret }}
+            - name: image-registries
+              mountPath: /etc/bifrost/image-registries
+              readOnly: true
+            {{- end }}
             {{- if eq .Values.auth.mode "oidc" }}
             - name: auth
               mountPath: /etc/bifrost/auth
@@ -223,6 +231,11 @@ spec:
           {{- end }}
         - name: tmp
           emptyDir: {}
+        {{- if .Values.imageRegistries.existingSecret }}
+        - name: image-registries
+          secret:
+            secretName: {{ .Values.imageRegistries.existingSecret }}
+        {{- end }}
         {{- if eq .Values.auth.mode "oidc" }}
         - name: auth
           configMap:
