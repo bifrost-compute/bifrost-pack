@@ -193,6 +193,12 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            # The root filesystem is read-only (securityContext), so anything
+            # that needs a scratch file gets this per-pod emptyDir. SQLite
+            # keeps its temp store in memory as of bifrost 2026-09-17, so this
+            # is belt-and-braces for Go's os.TempDir and any future spill.
+            - name: tmp
+              mountPath: /tmp
             {{- if eq .Values.auth.mode "oidc" }}
             - name: auth
               mountPath: /etc/bifrost/auth
@@ -215,6 +221,8 @@ spec:
           # file, if any). emptyDir keeps it per-pod.
           emptyDir: {}
           {{- end }}
+        - name: tmp
+          emptyDir: {}
         {{- if eq .Values.auth.mode "oidc" }}
         - name: auth
           configMap:
